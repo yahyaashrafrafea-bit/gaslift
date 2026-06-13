@@ -1,5 +1,5 @@
 # =============================================================
-#  Gas Lift Design Tool  -  Control-Room Edition
+#  Gas Lift Design Tool  -  "Bold Cream & Yellow" edition
 #  Petroleum Engineering | Artificial Lift - Chapter 3
 #  Single file. No plotly. Uses Altair (bundled with Streamlit).
 # =============================================================
@@ -12,101 +12,97 @@ import altair as alt
 st.set_page_config(page_title="Gas Lift Design", page_icon="🛢️", layout="wide")
 
 # ------------------------------------------------------------------
-#  THEME  (control-room instrument panel:
-#          amber = produced fluid/oil, cyan = injected gas)
+#  THEME
 # ------------------------------------------------------------------
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap');
 
 :root{
-  --bg:#0E1822; --surface:#16242F; --surface-2:#1C2E3A;
-  --line:#243845; --line-soft:#182530;
-  --amber:#E8A23D; --amber-soft:#F2C879; --cyan:#4FB6C4;
-  --text:#EDE6DB; --muted:#8298A4;
+  --bg:#F1EDE4; --card:#FFFFFF; --ink:#161616; --ink-soft:#5A554C;
+  --yellow:#FFD60A; --yellow-soft:#FFE765; --grid:#E3DDD0; --hair:#E7E1D4;
 }
 
-.stApp{
-  background:
-    radial-gradient(1100px 560px at 82% -12%, rgba(79,182,196,.07), transparent 60%),
-    radial-gradient(900px 520px at -10% 112%, rgba(232,162,61,.07), transparent 60%),
-    var(--bg);
-  color:var(--text);
-  font-family:'IBM Plex Sans',sans-serif;
-}
+.stApp{ background:var(--bg); color:var(--ink); font-family:'Inter',sans-serif; }
 header[data-testid="stHeader"]{ background:transparent; }
 
-section[data-testid="stSidebar"]{ background:var(--surface); border-right:1px solid var(--line); }
-section[data-testid="stSidebar"] *{ color:var(--text); }
+h1,h2,h3{ font-family:'Archivo',sans-serif!important; color:var(--ink); }
+
+/* sidebar */
+section[data-testid="stSidebar"]{ background:var(--card); border-right:2px solid var(--ink); }
 section[data-testid="stSidebar"] h2{
-  font-family:'Saira Condensed',sans-serif!important; text-transform:uppercase;
-  letter-spacing:1.5px; font-size:18px; color:var(--amber);
-}
+  font-family:'Archivo',sans-serif!important; text-transform:uppercase;
+  letter-spacing:1px; font-weight:800; font-size:18px; color:var(--ink); }
+section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-weight:500; }
 
-h1,h2,h3{ font-family:'Saira Condensed',sans-serif!important; letter-spacing:.5px; }
+.hl{ background:linear-gradient(transparent 55%, var(--yellow) 55%); padding:0 3px; }
 
-/* ---- Nameplate header ---- */
-.nameplate{
-  display:flex; align-items:center; gap:18px; padding:22px 26px; margin-bottom:8px;
-  background:linear-gradient(135deg,var(--surface-2),var(--surface));
-  border:1px solid var(--line); border-radius:14px; position:relative; overflow:hidden;
-}
-.nameplate::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
-  background:linear-gradient(90deg,var(--amber),var(--cyan)); }
-.nameplate .mono{
-  width:56px; height:56px; border-radius:12px; flex:none;
+/* ---- Nameplate ---- */
+.nameplate{ display:flex; align-items:center; gap:22px; padding:26px 30px; margin-bottom:0;
+  background:var(--card); border:2px solid var(--ink); border-radius:18px; }
+.nameplate .mono{ width:64px; height:64px; border-radius:50%; flex:none;
+  background:var(--yellow); border:2px solid var(--ink);
   display:flex; align-items:center; justify-content:center;
-  background:#0E1822; border:1px solid var(--line);
-  font-family:'Saira Condensed'; font-weight:700; font-size:24px; color:var(--amber);
-}
-.nameplate h1{ margin:0; font-size:36px; font-weight:700; text-transform:uppercase; line-height:1; }
-.nameplate .sub{ color:var(--muted); font-size:13px; margin-top:4px; }
-.chip{ margin-left:auto; font-family:'IBM Plex Mono'; font-size:11px; color:var(--cyan);
-  border:1px solid var(--line); padding:7px 13px; border-radius:999px;
-  text-transform:uppercase; letter-spacing:1.5px; white-space:nowrap; }
+  font-family:'Archivo'; font-weight:900; font-size:25px; color:var(--ink); }
+.nameplate h1{ margin:0; font-size:38px; font-weight:800; text-transform:uppercase; line-height:1.02; }
+.nameplate .sub{ color:var(--ink-soft); font-size:13.5px; margin-top:7px; font-weight:500; }
 
-/* ---- Gauge / metric cards ---- */
-.gauge-row{ display:flex; gap:16px; flex-wrap:wrap; margin:18px 0 6px; }
-.gauge{ flex:1; min-width:170px; background:var(--surface); border:1px solid var(--line);
-  border-radius:12px; padding:16px 18px 18px; position:relative; overflow:hidden; }
-.gauge::before{ content:""; position:absolute; top:0; left:0; width:100%; height:3px; background:var(--accent); }
-.gauge .label{ font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:var(--muted); }
-.gauge .value{ font-family:'IBM Plex Mono'; font-size:30px; font-weight:600; color:var(--text);
-  margin-top:8px; line-height:1; }
-.gauge .unit{ font-family:'IBM Plex Sans'; font-size:13px; color:var(--muted); margin-left:5px; }
+/* ---- Black marquee strip (signature, from reference) ---- */
+.marquee{ background:var(--ink); color:#fff; border-radius:12px; padding:13px 22px; margin:14px 0 4px;
+  display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:center;
+  font-family:'Archivo'; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; font-size:12.5px; }
+.marquee .star{ color:var(--yellow); }
 
-/* ---- Section label ---- */
-.eyebrow{ font-family:'IBM Plex Mono'; font-size:11px; letter-spacing:2px; text-transform:uppercase;
-  color:var(--cyan); margin:26px 0 2px; }
+/* ---- Eyebrow ---- */
+.eyebrow{ font-family:'Archivo'; font-weight:700; font-size:12px; letter-spacing:1.5px;
+  text-transform:uppercase; color:var(--ink-soft); margin:26px 0 6px; }
+.eyebrow .star{ color:var(--yellow); margin-right:7px; }
+
+/* ---- Gauge cards ---- */
+.gauge-row{ display:flex; gap:16px; flex-wrap:wrap; margin:6px 0; }
+.gauge{ flex:1; min-width:175px; background:var(--card); border:2px solid var(--ink);
+  border-radius:16px; padding:18px 20px; position:relative; }
+.gauge.solid{ background:var(--yellow); }
+.gauge .star{ position:absolute; top:15px; right:17px; color:var(--yellow); font-size:15px; }
+.gauge.solid .star{ color:var(--ink); }
+.gauge .label{ font-size:11.5px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); font-weight:600; }
+.gauge.solid .label{ color:var(--ink); }
+.gauge .value{ font-family:'Archivo'; font-weight:800; font-size:34px; color:var(--ink);
+  margin-top:10px; line-height:1; font-variant-numeric:tabular-nums; }
+.gauge .unit{ font-family:'Inter'; font-weight:500; font-size:13px; color:var(--ink-soft); margin-left:5px; }
 
 /* ---- Tabs ---- */
-.stTabs [data-baseweb="tab-list"]{ gap:4px; border-bottom:1px solid var(--line); }
-.stTabs [data-baseweb="tab"]{ font-family:'Saira Condensed'; text-transform:uppercase;
-  letter-spacing:1.2px; font-size:15px; color:var(--muted); }
-.stTabs [aria-selected="true"]{ color:var(--amber)!important; }
-.stTabs [data-baseweb="tab-highlight"]{ background:var(--amber)!important; }
+.stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:2px solid var(--ink); }
+.stTabs [data-baseweb="tab"]{ font-family:'Archivo'; font-weight:700; text-transform:uppercase;
+  letter-spacing:1px; font-size:15px; color:var(--ink-soft); }
+.stTabs [aria-selected="true"]{ color:var(--ink)!important; }
+.stTabs [data-baseweb="tab-highlight"]{ background:var(--yellow)!important; height:3px; }
 
-/* ---- Custom table ---- */
-.vtable{ width:100%; border-collapse:collapse; margin-top:6px; }
-.vtable th{ text-align:right; color:var(--muted); text-transform:uppercase; font-size:10.5px;
-  letter-spacing:1.2px; font-family:'IBM Plex Sans'; padding:10px 16px; border-bottom:1px solid var(--line); }
+/* ---- Table ---- */
+.tablewrap{ border:2px solid var(--ink); border-radius:14px; overflow:hidden; background:var(--card); margin-top:4px; }
+.vtable{ width:100%; border-collapse:collapse; }
+.vtable th{ background:var(--ink); color:#fff; text-transform:uppercase; font-size:11px;
+  letter-spacing:1px; font-family:'Archivo'; font-weight:700; padding:13px 16px; text-align:right; }
 .vtable th:first-child{ text-align:left; }
-.vtable td{ padding:12px 16px; border-bottom:1px solid var(--line-soft); color:var(--text);
-  font-family:'IBM Plex Mono'; font-size:13.5px; text-align:right; }
-.vtable td:first-child{ text-align:left; font-family:'IBM Plex Sans'; color:var(--muted); }
-.vtable tbody tr:hover{ background:var(--surface-2); }
-.vtable tbody tr:last-child td{ color:var(--amber); font-weight:600; }
-.vtable tbody tr:last-child td:first-child{ color:var(--amber); }
+.vtable td{ padding:13px 16px; border-bottom:1px solid var(--hair); font-family:'Inter';
+  font-weight:500; font-size:14px; text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
+.vtable td:first-child{ text-align:left; font-weight:600; }
+.vtable tbody tr:hover td{ background:#FBF7EC; }
+.vtable tbody tr:last-child td{ background:var(--yellow); font-weight:700; }
+.vtable tbody tr:last-child:hover td{ background:var(--yellow); }
 
-/* ---- Buttons ---- */
+/* ---- Buttons (yellow pill) ---- */
 .stDownloadButton button, .stButton button{
-  background:var(--amber); color:#0E1822; border:none; padding:9px 18px;
-  font-family:'Saira Condensed'; font-weight:600; text-transform:uppercase;
-  letter-spacing:1px; border-radius:8px; }
-.stDownloadButton button:hover, .stButton button:hover{ background:var(--amber-soft); color:#0E1822; }
+  background:var(--yellow)!important; color:var(--ink)!important; border:2px solid var(--ink)!important;
+  border-radius:999px!important; font-family:'Archivo'; font-weight:700; text-transform:uppercase;
+  letter-spacing:1px; padding:8px 24px!important; }
+.stDownloadButton button:hover, .stButton button:hover{ background:var(--ink)!important; color:#fff!important; }
 
-.foot{ color:var(--muted); font-family:'IBM Plex Mono'; font-size:11px; letter-spacing:.5px;
-  text-align:center; margin-top:34px; padding-top:14px; border-top:1px solid var(--line-soft); }
+/* ---- Footer (black, from reference) ---- */
+.foot{ background:var(--ink); color:#fff; border-radius:16px; padding:22px; margin-top:34px;
+  text-align:center; font-family:'Archivo'; font-weight:600; text-transform:uppercase;
+  letter-spacing:1.5px; font-size:11.5px; }
+.foot .star{ color:var(--yellow); margin:0 8px; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -192,19 +188,26 @@ else:
     Psurf_first, Psurf_rest = Psep, Psep
 
 # ------------------------------------------------------------------
-#  HEADER
+#  HEADER + MARQUEE
 # ------------------------------------------------------------------
 st.markdown(
     """
     <div class="nameplate">
       <div class="mono">GL</div>
       <div>
-        <h1>Gas Lift Design</h1>
+        <h1>Gas <span class="hl">Lift</span> Design</h1>
         <div class="sub">Continuous-flow unloading valve spacing, depths, gas volume &amp; injection pressure</div>
       </div>
-      <div class="chip">Continuous · Balanced Valve · Analytical</div>
     </div>
     """, unsafe_allow_html=True)
+
+st.markdown(
+    '<div class="marquee">'
+    '<span>Continuous Flow</span><span class="star">&#10038;</span>'
+    '<span>Balanced Valve</span><span class="star">&#10038;</span>'
+    '<span>Analytical Method</span><span class="star">&#10038;</span>'
+    '<span>Unloading Design</span>'
+    '</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 #  VALIDATION
@@ -233,17 +236,21 @@ PL = injection_pressure_at_depth(Pso, gamma_g, inj_depth, T_avg_R, Z)
 # ------------------------------------------------------------------
 #  GAUGES
 # ------------------------------------------------------------------
-def gauge(label, value, unit, accent):
+st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>Design Output</div>',
+            unsafe_allow_html=True)
+
+def gauge(label, value, unit, solid=False):
+    cls = "gauge solid" if solid else "gauge"
     u = f'<span class="unit">{unit}</span>' if unit else ""
-    return (f'<div class="gauge" style="--accent:{accent}">'
+    return (f'<div class="{cls}"><span class="star">&#10038;</span>'
             f'<div class="label">{label}</div>'
             f'<div class="value">{value}{u}</div></div>')
 
 cards = "".join([
-    gauge("Total Valves", res["n_valves"], "", "#4FB6C4"),
-    gauge("Unloading Valves", res["n_unloading"], "", "#4FB6C4"),
-    gauge("Gas Volume", f"{Vg/1e6:.2f}", "MMscf/d", "#E8A23D"),
-    gauge("Inj. Pressure @ Depth", f"{PL:,.0f}", "psi", "#E8A23D"),
+    gauge("Total Valves", res["n_valves"], "", solid=True),
+    gauge("Unloading Valves", res["n_unloading"], ""),
+    gauge("Gas Volume", f"{Vg/1e6:.2f}", "MMscf/d"),
+    gauge("Inj. Pressure @ Depth", f"{PL:,.0f}", "psi"),
 ])
 st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
 
@@ -253,22 +260,23 @@ st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
 tab1, tab2 = st.tabs(["Valve Schedule", "Well Diagram"])
 
 with tab1:
-    st.markdown('<div class="eyebrow">Valve placement from surface to injection point</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
+                'Valve placement from surface to injection point</div>', unsafe_allow_html=True)
     head = "".join(f"<th>{c}</th>" for c in df.columns)
     body = ""
     for _, r in df.iterrows():
         cells = "".join(f"<td>{r[c]}</td>" for c in df.columns)
         body += f"<tr>{cells}</tr>"
-    st.markdown(f'<table class="vtable"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>',
+    st.markdown(f'<div class="tablewrap"><table class="vtable">'
+                f'<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>',
                 unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", csv, "valve_schedule.csv", "text/csv")
 
 with tab2:
-    st.markdown('<div class="eyebrow">Pressure vs depth — gradients and valve positions</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
+                'Pressure vs depth - gradients and valve positions</div>', unsafe_allow_html=True)
     depths = np.linspace(0, well_depth, 60)
     line_df = pd.DataFrame({
         "Depth (ft)": np.concatenate([depths, depths]),
@@ -276,23 +284,24 @@ with tab2:
         "Line": (["Produced-fluid gradient"] * len(depths) + ["Gas injection pressure"] * len(depths)),
     })
     ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True))
-    lines = alt.Chart(line_df).mark_line(strokeWidth=2.5).encode(
+    lines = alt.Chart(line_df).mark_line(strokeWidth=2.8).encode(
         x=alt.X("Pressure (psi):Q"), y=ay,
         color=alt.Color("Line:N",
             scale=alt.Scale(domain=["Produced-fluid gradient", "Gas injection pressure"],
-                            range=["#E8A23D", "#4FB6C4"]),
+                            range=["#161616", "#E07B00"]),
             legend=alt.Legend(orient="top", title=None)))
     vp = df.rename(columns={"Surface Op. Pressure (psi)": "Pressure (psi)"})
-    points = alt.Chart(vp).mark_point(size=180, shape="triangle-down", filled=True,
-            color="#F2C879", stroke="#0E1822", strokeWidth=1.2).encode(
+    points = alt.Chart(vp).mark_point(size=210, shape="triangle-down", filled=True,
+            color="#FFD60A", stroke="#161616", strokeWidth=1.6).encode(
         x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)", "Pressure (psi)"])
-    labels = alt.Chart(vp).mark_text(align="left", dx=12, fontSize=12, color="#EDE6DB").encode(
+    labels = alt.Chart(vp).mark_text(align="left", dx=13, fontSize=12, color="#161616",
+            fontWeight="bold").encode(
         x="Pressure (psi):Q", y=ay, text="Valve")
     chart = (alt.layer(lines, points, labels)
              .properties(height=620, background="transparent")
-             .configure_axis(labelColor="#8298A4", titleColor="#EDE6DB",
-                             gridColor="#1A2A35", domainColor="#33454F")
-             .configure_legend(labelColor="#EDE6DB", titleColor="#8298A4")
+             .configure_axis(labelColor="#5A554C", titleColor="#161616",
+                             gridColor="#E3DDD0", domainColor="#161616")
+             .configure_legend(labelColor="#161616", titleColor="#5A554C")
              .configure_view(strokeWidth=0))
     st.altair_chart(chart, use_container_width=True)
 
@@ -309,5 +318,6 @@ with st.expander("About & Verification (Example 4)"):
         "- Inj. pressure: PL = Ps * exp(gamma_g*L / (53.34*Tavg*Z))"
     )
 
-st.markdown('<div class="foot">Continuous Gas Lift Design · Artificial Lift Chapter 3 · '
-            'amber = produced fluid · cyan = injected gas</div>', unsafe_allow_html=True)
+st.markdown('<div class="foot">Continuous Gas Lift Design'
+            '<span class="star">&#10038;</span>Artificial Lift Chapter 3'
+            '<span class="star">&#10038;</span>Petroleum Engineering</div>', unsafe_allow_html=True)
