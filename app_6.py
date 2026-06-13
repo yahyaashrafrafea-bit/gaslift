@@ -28,7 +28,6 @@ header[data-testid="stHeader"]{ background:transparent; }
 
 h1,h2,h3{ font-family:'Archivo',sans-serif!important; color:var(--ink); }
 
-/* sidebar */
 section[data-testid="stSidebar"]{ background:var(--card); border-right:2px solid var(--ink); }
 section[data-testid="stSidebar"] h2{
   font-family:'Archivo',sans-serif!important; text-transform:uppercase;
@@ -37,7 +36,6 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
 
 .hl{ background:linear-gradient(transparent 55%, var(--yellow) 55%); padding:0 3px; }
 
-/* ---- Nameplate ---- */
 .nameplate{ display:flex; align-items:center; gap:22px; padding:26px 30px; margin-bottom:0;
   background:var(--card); border:2px solid var(--ink); border-radius:18px; }
 .nameplate .mono{ width:64px; height:64px; border-radius:50%; flex:none;
@@ -47,18 +45,15 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
 .nameplate h1{ margin:0; font-size:38px; font-weight:800; text-transform:uppercase; line-height:1.02; }
 .nameplate .sub{ color:var(--ink-soft); font-size:13.5px; margin-top:7px; font-weight:500; }
 
-/* ---- Black marquee strip (signature, from reference) ---- */
 .marquee{ background:var(--ink); color:#fff; border-radius:12px; padding:13px 22px; margin:14px 0 4px;
   display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:center;
   font-family:'Archivo'; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; font-size:12.5px; }
 .marquee .star{ color:var(--yellow); }
 
-/* ---- Eyebrow ---- */
 .eyebrow{ font-family:'Archivo'; font-weight:700; font-size:12px; letter-spacing:1.5px;
   text-transform:uppercase; color:var(--ink-soft); margin:26px 0 6px; }
 .eyebrow .star{ color:var(--yellow); margin-right:7px; }
 
-/* ---- Gauge cards ---- */
 .gauge-row{ display:flex; gap:16px; flex-wrap:wrap; margin:6px 0; }
 .gauge{ flex:1; min-width:175px; background:var(--card); border:2px solid var(--ink);
   border-radius:16px; padding:18px 20px; position:relative; }
@@ -71,14 +66,12 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
   margin-top:10px; line-height:1; font-variant-numeric:tabular-nums; }
 .gauge .unit{ font-family:'Inter'; font-weight:500; font-size:13px; color:var(--ink-soft); margin-left:5px; }
 
-/* ---- Tabs ---- */
 .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:2px solid var(--ink); }
 .stTabs [data-baseweb="tab"]{ font-family:'Archivo'; font-weight:700; text-transform:uppercase;
   letter-spacing:1px; font-size:15px; color:var(--ink-soft); }
 .stTabs [aria-selected="true"]{ color:var(--ink)!important; }
 .stTabs [data-baseweb="tab-highlight"]{ background:var(--yellow)!important; height:3px; }
 
-/* ---- Table ---- */
 .tablewrap{ border:2px solid var(--ink); border-radius:14px; overflow:hidden; background:var(--card); margin-top:4px; }
 .vtable{ width:100%; border-collapse:collapse; }
 .vtable th{ background:var(--ink); color:#fff; text-transform:uppercase; font-size:11px;
@@ -91,14 +84,15 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
 .vtable tbody tr:last-child td{ background:var(--yellow); font-weight:700; }
 .vtable tbody tr:last-child:hover td{ background:var(--yellow); }
 
-/* ---- Buttons (yellow pill) ---- */
+.schematic{ background:var(--card); border:2px solid var(--ink); border-radius:16px;
+  padding:14px; display:flex; justify-content:center; }
+
 .stDownloadButton button, .stButton button{
   background:var(--yellow)!important; color:var(--ink)!important; border:2px solid var(--ink)!important;
   border-radius:999px!important; font-family:'Archivo'; font-weight:700; text-transform:uppercase;
   letter-spacing:1px; padding:8px 24px!important; }
 .stDownloadButton button:hover, .stButton button:hover{ background:var(--ink)!important; color:#fff!important; }
 
-/* ---- Footer (black, from reference) ---- */
 .foot{ background:var(--ink); color:#fff; border-radius:16px; padding:22px; margin-top:34px;
   text-align:center; font-family:'Archivo'; font-weight:600; text-transform:uppercase;
   letter-spacing:1.5px; font-size:11.5px; }
@@ -144,6 +138,81 @@ def injection_pressure_at_depth(Ps_psig, gamma_g, L, T_avg_R, Z):
     Ps_psia = Ps_psig + 14.7
     PL_psia = Ps_psia * np.exp((gamma_g * L) / (53.34 * T_avg_R * Z))
     return PL_psia - 14.7
+
+
+def wellbore_svg(df, well_depth, inj_depth):
+    """Hand-drawn-style wellbore schematic: casing, tubing, valves at depth."""
+    W, H = 470, 660
+    top, bot = 66, 34
+    usable = H - top - bot
+    def y(d):
+        return top + (d / well_depth) * usable
+    cx = 116
+    cas_l, cas_r = cx - 34, cx + 34
+    tub_l, tub_r = cx - 17, cx + 17
+    p = []
+    sy = top
+    td = y(well_depth)
+    iy = y(inj_depth)
+
+    # surface ground line + hatching
+    p.append(f'<line x1="34" y1="{sy}" x2="{W-18}" y2="{sy}" stroke="#161616" stroke-width="2.5"/>')
+    for hx in range(40, W - 24, 15):
+        p.append(f'<line x1="{hx}" y1="{sy}" x2="{hx-8}" y2="{sy+9}" stroke="#161616" stroke-width="1"/>')
+    p.append(f'<text x="34" y="{sy-7}" font-family="Inter,sans-serif" font-size="10" fill="#5A554C">0 ft</text>')
+
+    # wellhead
+    p.append(f'<rect x="{tub_l-7}" y="{sy-28}" width="{(tub_r-tub_l)+14}" height="28" '
+             f'fill="#FFD60A" stroke="#161616" stroke-width="2.5" rx="3"/>')
+    p.append(f'<text x="{cx}" y="{sy-9}" text-anchor="middle" font-family="Archivo,sans-serif" '
+             f'font-weight="800" font-size="10" fill="#161616">WELLHEAD</text>')
+
+    # casing
+    p.append(f'<line x1="{cas_l}" y1="{sy}" x2="{cas_l}" y2="{td}" stroke="#161616" stroke-width="2.5"/>')
+    p.append(f'<line x1="{cas_r}" y1="{sy}" x2="{cas_r}" y2="{td}" stroke="#161616" stroke-width="2.5"/>')
+    p.append(f'<line x1="{cas_l}" y1="{td}" x2="{cas_r}" y2="{td}" stroke="#161616" stroke-width="2.5"/>')
+
+    # tubing
+    p.append(f'<rect x="{tub_l}" y="{sy}" width="{tub_r-tub_l}" height="{td-sy}" '
+             f'fill="#FFFFFF" stroke="#161616" stroke-width="2"/>')
+
+    # injected gas arrows down the annulus (right side) to injection point
+    ax = (cas_r + tub_r) / 2
+    p.append(f'<text x="{cas_r+6}" y="{sy+13}" font-family="Archivo,sans-serif" '
+             f'font-weight="700" font-size="10" fill="#E07B00">GAS IN</text>')
+    gy = sy + 26
+    while gy < iy - 14:
+        p.append(f'<line x1="{ax}" y1="{gy}" x2="{ax}" y2="{gy+16}" stroke="#E07B00" stroke-width="2"/>')
+        p.append(f'<path d="M{ax-3},{gy+11} L{ax},{gy+17} L{ax+3},{gy+11} Z" fill="#E07B00"/>')
+        gy += 38
+
+    # valves
+    for _, r in df.iterrows():
+        d = float(r["Depth (ft)"])
+        vy = y(d)
+        name = r["Valve"]
+        is_op = (name == "Operating")
+        p.append(f'<rect x="{tub_r-5}" y="{vy-7}" width="10" height="14" '
+                 f'fill="#FFD60A" stroke="#161616" stroke-width="1.6"/>')
+        p.append(f'<line x1="{tub_r+5}" y1="{vy}" x2="{tub_r+42}" y2="{vy}" '
+                 f'stroke="#161616" stroke-width="1" stroke-dasharray="2,2"/>')
+        w = "800" if is_op else "600"
+        p.append(f'<text x="{tub_r+46}" y="{vy-2}" font-family="Archivo,sans-serif" '
+                 f'font-weight="{w}" font-size="11.5" fill="#161616">{name}</text>')
+        p.append(f'<text x="{tub_r+46}" y="{vy+11}" font-family="Inter,sans-serif" '
+                 f'font-size="10" fill="#5A554C">{d:.0f} ft</text>')
+
+    # operating-valve highlight ring + inflow arrow into tubing
+    p.append(f'<circle cx="{tub_r}" cy="{iy}" r="10" fill="none" stroke="#E07B00" stroke-width="2.2"/>')
+    p.append(f'<path d="M{ax},{iy} L{tub_r+2},{iy}" stroke="#E07B00" stroke-width="2"/>')
+    p.append(f'<path d="M{tub_r+5},{iy-3} L{tub_r-1},{iy} L{tub_r+5},{iy+3} Z" fill="#E07B00"/>')
+
+    # total depth label
+    p.append(f'<text x="34" y="{td+17}" font-family="Inter,sans-serif" font-size="10" '
+             f'fill="#5A554C">TD {well_depth:.0f} ft</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:470px;">'
+            + "".join(p) + '</svg>')
 
 # ------------------------------------------------------------------
 #  SIDEBAR : INPUTS
@@ -275,35 +344,44 @@ with tab1:
     st.download_button("Download CSV", csv, "valve_schedule.csv", "text/csv")
 
 with tab2:
-    st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
-                'Pressure vs depth - gradients and valve positions</div>', unsafe_allow_html=True)
-    depths = np.linspace(0, well_depth, 60)
-    line_df = pd.DataFrame({
-        "Depth (ft)": np.concatenate([depths, depths]),
-        "Pressure (psi)": np.concatenate([Psurf_rest + Gs * depths, Pso + 0.03 * depths]),
-        "Line": (["Produced-fluid gradient"] * len(depths) + ["Gas injection pressure"] * len(depths)),
-    })
-    ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True))
-    lines = alt.Chart(line_df).mark_line(strokeWidth=2.8).encode(
-        x=alt.X("Pressure (psi):Q"), y=ay,
-        color=alt.Color("Line:N",
-            scale=alt.Scale(domain=["Produced-fluid gradient", "Gas injection pressure"],
-                            range=["#161616", "#E07B00"]),
-            legend=alt.Legend(orient="top", title=None)))
-    vp = df.rename(columns={"Surface Op. Pressure (psi)": "Pressure (psi)"})
-    points = alt.Chart(vp).mark_point(size=210, shape="triangle-down", filled=True,
-            color="#FFD60A", stroke="#161616", strokeWidth=1.6).encode(
-        x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)", "Pressure (psi)"])
-    labels = alt.Chart(vp).mark_text(align="left", dx=13, fontSize=12, color="#161616",
-            fontWeight="bold").encode(
-        x="Pressure (psi):Q", y=ay, text="Valve")
-    chart = (alt.layer(lines, points, labels)
-             .properties(height=620, background="transparent")
-             .configure_axis(labelColor="#5A554C", titleColor="#161616",
-                             gridColor="#E3DDD0", domainColor="#161616")
-             .configure_legend(labelColor="#161616", titleColor="#5A554C")
-             .configure_view(strokeWidth=0))
-    st.altair_chart(chart, use_container_width=True)
+    col_a, col_b = st.columns([1, 1.35])
+
+    with col_a:
+        st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>Wellbore schematic</div>',
+                    unsafe_allow_html=True)
+        st.markdown(f'<div class="schematic">{wellbore_svg(df, well_depth, inj_depth)}</div>',
+                    unsafe_allow_html=True)
+
+    with col_b:
+        st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
+                    'Pressure vs depth</div>', unsafe_allow_html=True)
+        depths = np.linspace(0, well_depth, 60)
+        line_df = pd.DataFrame({
+            "Depth (ft)": np.concatenate([depths, depths]),
+            "Pressure (psi)": np.concatenate([Psurf_rest + Gs * depths, Pso + 0.03 * depths]),
+            "Line": (["Produced-fluid gradient"] * len(depths) + ["Gas injection pressure"] * len(depths)),
+        })
+        ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True))
+        lines = alt.Chart(line_df).mark_line(strokeWidth=2.8).encode(
+            x=alt.X("Pressure (psi):Q"), y=ay,
+            color=alt.Color("Line:N",
+                scale=alt.Scale(domain=["Produced-fluid gradient", "Gas injection pressure"],
+                                range=["#161616", "#E07B00"]),
+                legend=alt.Legend(orient="top", title=None)))
+        vp = df.rename(columns={"Surface Op. Pressure (psi)": "Pressure (psi)"})
+        points = alt.Chart(vp).mark_point(size=210, shape="triangle-down", filled=True,
+                color="#FFD60A", stroke="#161616", strokeWidth=1.6).encode(
+            x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)", "Pressure (psi)"])
+        labels = alt.Chart(vp).mark_text(align="left", dx=13, fontSize=12, color="#161616",
+                fontWeight="bold").encode(
+            x="Pressure (psi):Q", y=ay, text="Valve")
+        chart = (alt.layer(lines, points, labels)
+                 .properties(height=620, background="transparent")
+                 .configure_axis(labelColor="#5A554C", titleColor="#161616",
+                                 gridColor="#E3DDD0", domainColor="#161616")
+                 .configure_legend(labelColor="#161616", titleColor="#5A554C")
+                 .configure_view(strokeWidth=0))
+        st.altair_chart(chart, use_container_width=True)
 
 with st.expander("About & Verification (Example 4)"):
     st.markdown(
