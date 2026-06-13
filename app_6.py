@@ -354,32 +354,72 @@ with tab2:
 
     with col_b:
         st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
-                    'Pressure vs depth</div>', unsafe_allow_html=True)
-        depths = np.linspace(0, well_depth, 60)
-        line_df = pd.DataFrame({
-            "Depth (ft)": np.concatenate([depths, depths]),
-            "Pressure (psi)": np.concatenate([Psurf_rest + Gs * depths, Pso + 0.03 * depths]),
-            "Line": (["Produced-fluid gradient"] * len(depths) + ["Gas injection pressure"] * len(depths)),
-        })
-        ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True))
-        lines = alt.Chart(line_df).mark_line(strokeWidth=2.8).encode(
-            x=alt.X("Pressure (psi):Q"), y=ay,
-            color=alt.Color("Line:N",
-                scale=alt.Scale(domain=["Produced-fluid gradient", "Gas injection pressure"],
-                                range=["#161616", "#E07B00"]),
-                legend=alt.Legend(orient="top", title=None)))
-        vp = df.rename(columns={"Surface Op. Pressure (psi)": "Pressure (psi)"})
-        points = alt.Chart(vp).mark_point(size=210, shape="triangle-down", filled=True,
-                color="#FFD60A", stroke="#161616", strokeWidth=1.6).encode(
-            x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)", "Pressure (psi)"])
-        labels = alt.Chart(vp).mark_text(align="left", dx=13, fontSize=12, color="#161616",
-                fontWeight="bold").encode(
-            x="Pressure (psi):Q", y=ay, text="Valve")
-        chart = (alt.layer(lines, points, labels)
-                 .properties(height=620, background="transparent")
+                    'Pressure traverse &amp; valve spacing</div>', unsafe_allow_html=True)
+
+        def gasP(d, Ps):
+            return (Ps + 14.7) * np.exp(gamma_g * d / (53.34 * T_avg_R * Z)) - 14.7
+
+        TD = well_depth
+        dd = np.linspace(0, TD, 80)
+        dd_u = np.linspace(0, inj_depth, 40)
+        dd_b = np.linspace(inj_depth, TD, 30)
+        Pinj = float(gasP(inj_depth, Pso))
+
+        rows = []
+        for d in dd:
+            rows.append((float(gasP(d, Pso)), float(d), "Gas injection pressure (Pso)"))
+        for d in dd:
+            rows.append((float(gasP(d, Pko)), float(d), "Kick-off pressure (Pko)"))
+        for d in dd_u:
+            rows.append((Psurf_rest + Gs * float(d), float(d), "Kill-fluid gradient (Gs)"))
+        for d in dd_u:
+            rows.append((Pwh + Gu * float(d), float(d), "Unloading gradient (Gu)"))
+        for d in dd_b:
+            rows.append((Pinj + Gs * (float(d) - inj_depth), float(d), "Produced fluid below inj."))
+        line_df = pd.DataFrame(rows, columns=["Pressure (psi)", "Depth (ft)", "series"])
+
+        order = ["Gas injection pressure (Pso)", "Kick-off pressure (Pko)",
+                 "Kill-fluid gradient (Gs)", "Unloading gradient (Gu)",
+                 "Produced fluid below inj."]
+        palette = ["#2BA8E0", "#1B6B3A", "#3FAE4A", "#B0179B", "#E8852B"]
+
+        ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True), title="Depth (ft)")
+        ax = alt.X("Pressure (psi):Q", title="Pressure (psig)")
+
+        lines = alt.Chart(line_df).mark_line(strokeWidth=2.4).encode(
+            x=ax, y=ay,
+            color=alt.Color("series:N", scale=alt.Scale(domain=order, range=palette),
+                            legend=alt.Legend(orient="bottom", title=None, columns=2)))
+
+        # valve points on the gas-injection line, at their depths
+        vp = df.copy()
+        vp["Pressure (psi)"] = [float(gasP(d, ps)) for d, ps
+                                in zip(vp["Depth (ft)"], vp["Surface Op. Pressure (psi)"])]
+
+        # red dashed valve-spacing construction (valve point -> kill-fluid line)
+        stair_rows = []
+        for d, ps in zip(vp["Depth (ft)"], vp["Surface Op. Pressure (psi)"]):
+            xv = float(gasP(d, ps)); xl = Psurf_rest + Gs * float(d)
+            stair_rows.append((min(xv, xl), max(xv, xl), float(d)))
+        stair_df = pd.DataFrame(stair_rows, columns=["x", "x2", "Depth (ft)"])
+        stairs = alt.Chart(stair_df).mark_rule(color="#E0392B", strokeDash=[5, 3],
+                strokeWidth=1.4).encode(x="x:Q", x2="x2:Q", y=ay)
+
+        points = alt.Chart(vp).mark_point(size=200, shape="triangle-right", filled=True,
+                color="#FFD60A", stroke="#161616", strokeWidth=1.5).encode(
+            x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)"])
+        vlabels = alt.Chart(vp).mark_text(align="left", dx=12, fontSize=11, color="#161616",
+                fontWeight="bold").encode(x="Pressure (psi):Q", y=ay, text="Valve")
+
+        inj_df = pd.DataFrame({"Pressure (psi)": [Pinj], "Depth (ft)": [inj_depth]})
+        inj_pt = alt.Chart(inj_df).mark_point(size=320, shape="circle", filled=False,
+                color="#E0392B", strokeWidth=2.5).encode(x="Pressure (psi):Q", y=ay)
+
+        chart = (alt.layer(lines, stairs, points, vlabels, inj_pt)
+                 .properties(height=660, background="transparent")
                  .configure_axis(labelColor="#5A554C", titleColor="#161616",
                                  gridColor="#E3DDD0", domainColor="#161616")
-                 .configure_legend(labelColor="#161616", titleColor="#5A554C")
+                 .configure_legend(labelColor="#161616", labelFontSize=11)
                  .configure_view(strokeWidth=0))
         st.altair_chart(chart, use_container_width=True)
 
