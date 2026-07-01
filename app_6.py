@@ -2,27 +2,17 @@
 #  GAS LIFT DESIGN TOOL  -  Continuous Flow
 #  Petroleum Engineering | Artificial Lift - Chapter 3
 #
-#  VALVE-SPACING METHOD: Analytical method (source: Chapter 3).
-#  The source lists two methods only: (1) Analytical, (2) Graphical
-#  (balanced valve with design wellhead pressure). This app uses (1).
+#  VALVE TYPE (design method) - selectable, per source:
+#    * BALANCED valve   : surface operating pressure is reduced by dP
+#                         (15-25 psi/valve) toward the bottomhole.
+#    * UNBALANCED valve : Pso is used for ALL valve depths (constant).
 #
-#  -------------------- INPUTS (sidebar) --------------------
-#   Well       : well depth, tubing size, flow rate q, water cut, gas inj. depth
-#   Reservoir  : static BHP / reservoir pressure (Pr), productivity index (PI)
-#   Pressures  : kick-off (Pko), surface operating (Pso), wellhead (Pwh)
-#   Gradients  : kill-fluid (Gs), unloading (Gu, from OTIS chart), dP, min spacing
-#   Unloading  : pit / wellhead / separator
-#   Gas        : gravity, avg temperature, Z, injection GLR
+#  Gs (produced/kill-fluid gradient) is read automatically from the OTIS
+#  "Gradients for salt water-oil mixtures" chart via oil API + water cut,
+#  validated against source Examples 1-3 (API35/SW90% -> 0.455 psi/ft).
 #
-#  -------------------- OUTPUTS (main panel) ----------------
-#   - Valve schedule: depth + operating pressure of each valve
-#   - Total / unloading valve count, gas volume required, inj. pressure at depth
-#   - Flowing bottomhole pressure Pwf  (straight-line IPR: Pwf = Pr - q/PI)
-#   - Pressure-traverse / valve-spacing diagram + wellbore schematic
-#
-#  NOTE: The analytical valve-spacing method does NOT itself need PI or BHP
-#  (source: "can be used when BHP and PI are unknown"). Pr and PI are used
-#  only for the IPR (Pwf) and the flowing/static traverse lines in the diagram.
+#  Pwf from PI method (undersaturated): Pwf = Pr - q/PI
+#  (validated: Pr3000/PI6.0/q800 -> 2867 psig, matches source Example 1).
 # =============================================================
 
 import streamlit as st
@@ -63,14 +53,14 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
   text-transform:uppercase; color:var(--ink-soft); margin:26px 0 6px; }
 .eyebrow .star{ color:var(--yellow); margin-right:7px; }
 .gauge-row{ display:flex; gap:14px; flex-wrap:wrap; margin:6px 0; }
-.gauge{ flex:1; min-width:160px; background:var(--card); border:2px solid var(--ink);
+.gauge{ flex:1; min-width:155px; background:var(--card); border:2px solid var(--ink);
   border-radius:16px; padding:16px 18px; position:relative; }
 .gauge.solid{ background:var(--yellow); }
 .gauge .star{ position:absolute; top:14px; right:15px; color:var(--yellow); font-size:14px; }
 .gauge.solid .star{ color:var(--ink); }
 .gauge .label{ font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--ink-soft); font-weight:600; }
 .gauge.solid .label{ color:var(--ink); }
-.gauge .value{ font-family:'Archivo'; font-weight:800; font-size:30px; color:var(--ink);
+.gauge .value{ font-family:'Archivo'; font-weight:800; font-size:28px; color:var(--ink);
   margin-top:9px; line-height:1; font-variant-numeric:tabular-nums; }
 .gauge .unit{ font-family:'Inter'; font-weight:500; font-size:12px; color:var(--ink-soft); margin-left:4px; }
 .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:2px solid var(--ink); }
@@ -98,6 +88,9 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
 .note{ background:var(--card); border:2px solid var(--ink); border-radius:14px; padding:16px 20px;
   font-size:13.5px; line-height:1.6; }
 .note b{ font-family:'Archivo'; }
+.pill{ display:inline-block; background:var(--yellow); border:2px solid var(--ink); border-radius:999px;
+  padding:3px 12px; font-family:'Archivo'; font-weight:700; font-size:12px; text-transform:uppercase;
+  letter-spacing:.5px; }
 .foot{ background:var(--ink); color:#fff; border-radius:16px; padding:22px; margin-top:34px; text-align:center;
   font-family:'Archivo'; font-weight:600; text-transform:uppercase; letter-spacing:1.5px; font-size:11.5px; }
 .foot .star{ color:var(--yellow); margin:0 8px; }
@@ -108,36 +101,59 @@ st.markdown(CSS, unsafe_allow_html=True)
 # ==================================================================
 #  CORE ENGINEERING LOGIC
 # ==================================================================
-def design_gas_lift(Pko, Pso, Gs, Gu, dP, min_spacing, inj_depth, Psurf_first, Psurf_rest):
-    """ANALYTICAL valve-spacing method (Chapter 3). Inputs are pressures/gradients
-    only - PI and BHP are NOT required by this method."""
+def oil_gradient_from_api(api):
+    """Pure-oil pressure gradient (0% water) from API gravity, psi/ft.
+    SG_oil = 141.5/(131.5+API); gradient = SG*0.433."""
+    sg = 141.5 / (131.5 + api)
+    return sg * 0.433
+
+
+def gs_from_chart(api, pct_water):
+    """OTIS 'Gradients for salt water-oil mixtures' chart, digitized.
+    Each API line runs from its pure-oil gradient at 0% water to the common
+    salt-water node 0.465 psi/ft at 100% water. Linear interpolation.
+    Validated vs source: API35/SW90% -> 0.455 psi/ft (Examples 1 & 3)."""
+    SALT_WATER_GRADIENT = 0.465
+    g0 = oil_gradient_from_api(api)
+    return g0 + (pct_water / 100.0) * (SALT_WATER_GRADIENT - g0)
+
+
+def flowing_bhp_PI(Pr, PI, q):
+    """PI method (undersaturated reservoir): Pwf = Pr - q/PI.
+    Validated vs source: Pr3000/PI6.0/q800 -> 2867 psig (Example 1)."""
+    return Pr - q / PI
+
+
+def design_gas_lift(valve_type, Pko, Pso, Gs, Gu, dP, min_spacing,
+                    inj_depth, Psurf_first, Psurf_rest):
+    """Analytical valve-spacing method (Chapter 3).
+    BALANCED   -> surface operating pressure reduced by dP each valve.
+    UNBALANCED -> Pso constant for all valves (source: 'Pso is used for all
+                  valves depth')."""
     valves = []
-    DV1 = (Pko - 50 - Psurf_first) / Gs                       # first (top) valve
+    DV1 = (Pko - 50 - Psurf_first) / Gs
     valves.append({"Valve": "V1 (Top)", "Depth (ft)": round(DV1, 1),
-                   "Surface Op. Pressure (psi)": round(Pso, 1),
-                   "Spacing from previous (ft)": round(DV1, 1)})
+                   "Op. Pressure (psi)": round(Pso, 1),
+                   "Spacing (ft)": round(DV1, 1)})
     Pso_n, DV_prev, n = Pso, DV1, 1
     while True:
-        Pso_n = Pso_n - dP
-        increment = (Pso_n - Gu * DV_prev - Psurf_rest) / Gs   # consequent valves
+        if valve_type == "Balanced":
+            Pso_n = Pso_n - dP                      # reduce for balanced
+        # unbalanced: Pso_n stays = Pso
+        increment = (Pso_n - Gu * DV_prev - Psurf_rest) / Gs
         DV_new = DV_prev + increment
         if DV_new >= inj_depth or increment < min_spacing:
             break
         n += 1
         valves.append({"Valve": f"V{n}", "Depth (ft)": round(DV_new, 1),
-                       "Surface Op. Pressure (psi)": round(Pso_n, 1),
-                       "Spacing from previous (ft)": round(increment, 1)})
+                       "Op. Pressure (psi)": round(Pso_n, 1),
+                       "Spacing (ft)": round(increment, 1)})
         DV_prev = DV_new
     valves.append({"Valve": "Operating", "Depth (ft)": round(inj_depth, 1),
-                   "Surface Op. Pressure (psi)": round(Pso_n, 1),
-                   "Spacing from previous (ft)": round(inj_depth - DV_prev, 1)})
+                   "Op. Pressure (psi)": round(Pso_n, 1),
+                   "Spacing (ft)": round(inj_depth - DV_prev, 1)})
     df = pd.DataFrame(valves)
     return df, {"n_valves": len(df), "n_unloading": len(df) - 1}
-
-
-def flowing_bhp(Pr, PI, q):
-    """Straight-line IPR (source data list: 'PI or flowing BHP'):  Pwf = Pr - q/PI"""
-    return Pr - q / PI
 
 
 def gas_volume_required(glr_inj, inj_depth, q):
@@ -189,30 +205,40 @@ def wellbore_svg(df, well_depth, inj_depth):
 # ==================================================================
 st.sidebar.header("Inputs")
 
+with st.sidebar.expander("Design Method", expanded=True):
+    valve_type = st.radio("Valve type", ["Balanced", "Unbalanced"], horizontal=True,
+                          help="Balanced: Pso reduced by dP per valve. "
+                               "Unbalanced: Pso constant for all valves.")
+
 with st.sidebar.expander("Well Data", expanded=True):
     well_depth = st.number_input("Well depth (ft)", value=5000.0, min_value=100.0, step=100.0)
     tubing = st.selectbox("Tubing size (in)", ["2", "2.5", "3"], index=1)
     q = st.number_input("Design flow rate, q (bbl/d)", value=1200.0, min_value=1.0, step=50.0)
-    wc = st.number_input("Water cut (%)", value=80.0, min_value=0.0, max_value=100.0, step=5.0)
     inj_depth = st.number_input("Gas injection depth (ft)", value=3921.0, min_value=100.0, step=50.0)
+
+with st.sidebar.expander("Fluid Properties (-> Gs)", expanded=True):
+    api = st.number_input("Oil gravity (deg API)", value=35.0, min_value=10.0, max_value=60.0, step=1.0)
+    water_cut = st.number_input("Water cut / salt water (%)", value=80.0, min_value=0.0, max_value=100.0, step=5.0)
+    Gs = gs_from_chart(api, water_cut)
+    st.markdown(f'<span class="pill">Gs = {Gs:.3f} psi/ft</span>', unsafe_allow_html=True)
+    st.caption("Gs read automatically from the OTIS salt water-oil gradient chart "
+               "(API + water cut). Validated vs source Examples 1-3.")
 
 with st.sidebar.expander("Reservoir / IPR", expanded=True):
     Pr = st.number_input("Static BHP / reservoir pressure, Pr (psi)", value=2500.0, min_value=0.0, step=50.0)
     PI = st.number_input("Productivity index, PI (bbl/d/psi)", value=1.0, min_value=0.001, step=0.1, format="%.3f")
-    st.caption("Used for IPR (Pwf = Pr - q/PI) and the traverse lines. "
-               "Not required by the analytical valve-spacing method.")
 
 with st.sidebar.expander("Pressures", expanded=True):
     Pko = st.number_input("Kick-off pressure, Pko (psi)", value=900.0, min_value=0.0, step=10.0)
     Pso = st.number_input("Surface operating pressure, Pso (psi)", value=850.0, min_value=0.0, step=10.0)
     Pwh = st.number_input("Wellhead pressure, Pwh (psi)", value=200.0, min_value=0.0, step=10.0)
 
-with st.sidebar.expander("Gradients & Valves", expanded=True):
-    Gs = st.number_input("Kill-fluid gradient, Gs (psi/ft)", value=0.5, min_value=0.001, step=0.01, format="%.3f")
+with st.sidebar.expander("Valve Spacing Parameters", expanded=True):
     Gu = st.number_input("Design unloading gradient, Gu (psi/ft)", value=0.125, min_value=0.001, step=0.005, format="%.3f")
-    st.caption("Gu is read from the OTIS unloading-gradient chart (Chapter 3) "
-               "using your tubing size and design rate.")
-    dP = st.number_input("Valve pressure drop, dP (psi/valve)", value=25.0, min_value=1.0, step=5.0)
+    st.caption("Gu from the OTIS unloading-gradient chart (tubing size & rate).")
+    dP = st.number_input("Valve pressure drop, dP (psi/valve)", value=25.0, min_value=1.0, step=5.0,
+                         disabled=(valve_type == "Unbalanced"),
+                         help="Used for balanced valves only (15-25 psi).")
     min_spacing = st.number_input("Minimum valve spacing (ft)", value=250.0, min_value=10.0, step=10.0)
 
 with st.sidebar.expander("Unloading Method"):
@@ -248,16 +274,16 @@ st.markdown(
       </div>
     </div>
     """, unsafe_allow_html=True)
-st.markdown('<div class="marquee"><span>Continuous Flow</span><span class="star">&#10038;</span>'
-            '<span>Balanced Valve</span><span class="star">&#10038;</span>'
-            '<span>Analytical Method</span><span class="star">&#10038;</span>'
-            '<span>Unloading Design</span></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="marquee"><span>Continuous Flow</span><span class="star">&#10038;</span>'
+            f'<span>{valve_type} Valve</span><span class="star">&#10038;</span>'
+            f'<span>Analytical Method</span><span class="star">&#10038;</span>'
+            f'<span>OTIS Gs Chart</span></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 #  VALIDATION
 # ------------------------------------------------------------------
 T_avg_R = T_avg_F + 460.0
-Pwf = flowing_bhp(Pr, PI, q)
+Pwf = flowing_bhp_PI(Pr, PI, q)
 errors = []
 if Pso >= Pko:
     errors.append("Surface operating pressure (Pso) must be lower than kick-off pressure (Pko).")
@@ -275,7 +301,8 @@ if errors:
 # ------------------------------------------------------------------
 #  CALCULATE OUTPUTS
 # ------------------------------------------------------------------
-df, res = design_gas_lift(Pko, Pso, Gs, Gu, dP, min_spacing, inj_depth, Psurf_first, Psurf_rest)
+df, res = design_gas_lift(valve_type, Pko, Pso, Gs, Gu, dP, min_spacing,
+                          inj_depth, Psurf_first, Psurf_rest)
 Vg = gas_volume_required(glr_inj, inj_depth, q)
 PL = injection_pressure_at_depth(Pso, gamma_g, inj_depth, T_avg_R, Z)
 
@@ -292,10 +319,10 @@ def gauge(label, value, unit, solid=False):
 
 cards = "".join([
     gauge("Total Valves", res["n_valves"], "", solid=True),
-    gauge("Unloading Valves", res["n_unloading"], ""),
+    gauge("Gs (chart)", f"{Gs:.3f}", "psi/ft"),
+    gauge("Flowing BHP (Pwf)", f"{Pwf:,.0f}", "psi"),
     gauge("Gas Volume", f"{Vg/1e6:.2f}", "MMscf/d"),
     gauge("Inj. Pressure @ Depth", f"{PL:,.0f}", "psi"),
-    gauge("Flowing BHP (Pwf)", f"{Pwf:,.0f}", "psi"),
 ])
 st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
 
@@ -305,8 +332,9 @@ st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
 tab1, tab2, tab3 = st.tabs(["Valve Schedule", "Well Diagram", "Method & Inputs"])
 
 with tab1:
-    st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
-                'Valve placement from surface to injection point</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="eyebrow"><span class="star">&#10038;</span>'
+                f'{valve_type} valve - placement from surface to injection point</div>',
+                unsafe_allow_html=True)
     head = "".join(f"<th>{c}</th>" for c in df.columns)
     body = "".join("<tr>" + "".join(f"<td>{r[c]}</td>" for c in df.columns) + "</tr>"
                    for _, r in df.iterrows())
@@ -341,11 +369,9 @@ with tab2:
         for d in dd:   rows.append((float(gasP(d, Pko)), float(d), "Kick-off pressure (Pko)"))
         for d in dd_u: rows.append((Psurf_rest + Gs * float(d), float(d), "Kill-fluid gradient (Gs)"))
         for d in dd_u: rows.append((Pwh + Gu * float(d), float(d), "Unloading gradient (Gu)"))
-        # flowing traverse below inj. point -> reaches Pwf at TD
         for d in dd_b:
             frac = (float(d) - inj_depth) / max(TD - inj_depth, 1e-6)
             rows.append((Pinj + frac * (Pwf - Pinj), float(d), "Flowing gradient below inj."))
-        # static reservoir gradient anchored at Pr at TD (slope Gs)
         d_top = max(0.0, TD - Pr / Gs)
         for d in np.linspace(d_top, TD, 30):
             rows.append((Pr - Gs * (TD - float(d)), float(d), "Static reservoir gradient"))
@@ -364,9 +390,9 @@ with tab2:
 
         vp = df.copy()
         vp["Pressure (psi)"] = [float(gasP(d, ps)) for d, ps
-                                in zip(vp["Depth (ft)"], vp["Surface Op. Pressure (psi)"])]
+                                in zip(vp["Depth (ft)"], vp["Op. Pressure (psi)"])]
         stair_rows = []
-        for d, ps in zip(vp["Depth (ft)"], vp["Surface Op. Pressure (psi)"]):
+        for d, ps in zip(vp["Depth (ft)"], vp["Op. Pressure (psi)"]):
             xv = float(gasP(d, ps)); xl = Psurf_rest + Gs * float(d)
             stair_rows.append((min(xv, xl), max(xv, xl), float(d)))
         stair_df = pd.DataFrame(stair_rows, columns=["x", "x2", "Depth (ft)"])
@@ -396,29 +422,26 @@ with tab3:
                 unsafe_allow_html=True)
     st.markdown(
         '<div class="note">'
-        '<b>Valve-spacing method:</b> Analytical method (Chapter 3). The source lists two '
-        'methods only - (1) Analytical and (2) Graphical (balanced valve with design wellhead '
-        'pressure); this tool uses the Analytical method.<br><br>'
-        '<b>Why no PI / BHP in the spacing calculation?</b> The source states the analytical '
-        'method "can be used when BHP and PI are unknown, and the method neglects the gas-column '
-        'weight." So PI and reservoir pressure are not required to space the valves. They are '
-        'used here only for the IPR (flowing bottomhole pressure) and the flowing / static '
-        'traverse lines in the diagram.<br><br>'
-        '<b>Inputs:</b> well depth, tubing size, rate q, water cut, injection depth, reservoir '
-        'pressure Pr, productivity index PI, Pko, Pso, Pwh, kill-fluid gradient Gs, unloading '
-        'gradient Gu (from OTIS chart), valve dP, minimum spacing, unloading destination, gas '
-        'gravity, temperature, Z, injection GLR.<br><br>'
-        '<b>Outputs:</b> valve schedule (depth + operating pressure), valve count, gas volume '
-        'required, injection pressure at depth, flowing bottomhole pressure Pwf, and the '
-        'pressure-traverse / wellbore diagram.<br><br>'
-        '<b>Key equations (Analytical Method):</b><br>'
+        f'<b>Selected design method:</b> {valve_type} valve.<br>'
+        '&bull; <b>Balanced:</b> surface operating pressure is reduced by dP (15-25 psi) at '
+        'each valve toward the bottomhole.<br>'
+        '&bull; <b>Unbalanced:</b> Pso is used for all valve depths (constant) - source: '
+        '"For unbalanced valve Pso is used for all valves depth."<br><br>'
+        '<b>Gs (produced/kill-fluid gradient):</b> read automatically from the OTIS '
+        '"gradients for salt water-oil mixtures" chart using oil API and water cut. Each API '
+        'line runs from its pure-oil gradient (0% water) to the 0.465 psi/ft salt-water node '
+        '(100% water). Validated: API 35 / 90% water -> 0.455 psi/ft (source Examples 1 &amp; 3).'
+        '<br><br>'
+        '<b>Flowing bottomhole pressure:</b> PI method (undersaturated reservoir), '
+        'Pwf = Pr - q/PI. Validated: Pr 3000 / PI 6.0 / q 800 -> 2867 psig (source Example 1).'
+        '<br><br>'
+        '<b>Valve-spacing (Analytical Method):</b><br>'
         '&bull; First valve: DV1 = (Pko - 50 - Psurf) / Gs<br>'
         '&bull; Next valves: DVn+1 = DVn + (Pso_n - Gu&middot;DVn - Psurf) / Gs<br>'
-        '&bull; IPR: Pwf = Pr - q / PI<br>'
         '&bull; Gas volume: Vg = GLR_inj &times; (D_inj / 1000) &times; q<br>'
         '&bull; Inj. pressure: PL = Ps &middot; exp(gamma_g&middot;L / (53.34&middot;Tavg&middot;Z))'
         '</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="foot">Continuous Gas Lift Design<span class="star">&#10038;</span>'
-            'Artificial Lift Chapter 3<span class="star">&#10038;</span>Analytical Method</div>',
+st.markdown(f'<div class="foot">Continuous Gas Lift Design<span class="star">&#10038;</span>'
+            f'{valve_type} Valve<span class="star">&#10038;</span>Analytical Method</div>',
             unsafe_allow_html=True)
