@@ -2,18 +2,15 @@
 #  GAS LIFT DESIGN TOOL  -  Continuous Flow
 #  Petroleum Engineering | Artificial Lift - Chapter 3
 #
-#  VALVE TYPE (design method) - selectable:
-#    * BALANCED   : Pso reduced by dP (15-25 psi) per valve toward bottom.
-#    * UNBALANCED : Pso used for ALL valve depths (constant).
-#
-#  KEY COMPUTED RESULTS (from equations, not user-entered):
-#    * Gs  : OTIS salt water-oil chart via API + water cut
-#            (validated: API35/SW90% -> 0.455 psi/ft, source Ex.1&3).
-#    * Pwf : PI method  Pwf = Pr - q/PI  (or entered directly if known)
-#            (validated: Pr3000/PI6.0/q800 -> 2867 psig, source Ex.1).
-#    * DPOI (gas injection depth): point of balance between the gas-injection
-#            (Pso) line and the flowing gradient below injection (Gfb=Gs,
-#            anchored at Pwf), minus the operating-valve pressure drop.
+#  Fully computed from equations (validated vs source Examples 1-3):
+#   * Gs   : OTIS salt water-oil chart (API + water cut)   [API35/SW90 -> 0.455]
+#   * Pwf  : PI method  Pwf = Pr - q/PI  (or entered directly)   [Ex1 -> 2867]
+#   * SFL  : static fluid level  = D - Pr/Gs                     [Ex1 -> 3407]
+#   * WFL  : working fluid level = D - Pwf/Gs                    [Ex1 -> 3699]
+#   * Gpko,Gpso : gas-column gradients from Pko,Pso & gas gravity[Ex1 -> 25,22]
+#   * Pko@D,Pso@D : casing pressures at well depth              [Ex1 -> 1200,1026]
+#   * DPOI : point of balance (Pso gas line vs Gfb) minus valve dP
+#   * Valve spacing: graphical construction using Gs + gas lines (NO Gu)
 # =============================================================
 
 import streamlit as st
@@ -53,17 +50,17 @@ section[data-testid="stSidebar"] label{ color:var(--ink-soft)!important; font-we
 .eyebrow{ font-family:'Archivo'; font-weight:700; font-size:12px; letter-spacing:1.5px;
   text-transform:uppercase; color:var(--ink-soft); margin:26px 0 6px; }
 .eyebrow .star{ color:var(--yellow); margin-right:7px; }
-.gauge-row{ display:flex; gap:14px; flex-wrap:wrap; margin:6px 0; }
-.gauge{ flex:1; min-width:150px; background:var(--card); border:2px solid var(--ink);
-  border-radius:16px; padding:16px 18px; position:relative; }
+.gauge-row{ display:flex; gap:13px; flex-wrap:wrap; margin:6px 0; }
+.gauge{ flex:1; min-width:145px; background:var(--card); border:2px solid var(--ink);
+  border-radius:16px; padding:15px 17px; position:relative; }
 .gauge.solid{ background:var(--yellow); }
-.gauge .star{ position:absolute; top:14px; right:15px; color:var(--yellow); font-size:14px; }
+.gauge .star{ position:absolute; top:13px; right:14px; color:var(--yellow); font-size:13px; }
 .gauge.solid .star{ color:var(--ink); }
-.gauge .label{ font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--ink-soft); font-weight:600; }
+.gauge .label{ font-size:10.5px; text-transform:uppercase; letter-spacing:.7px; color:var(--ink-soft); font-weight:600; }
 .gauge.solid .label{ color:var(--ink); }
-.gauge .value{ font-family:'Archivo'; font-weight:800; font-size:27px; color:var(--ink);
-  margin-top:9px; line-height:1; font-variant-numeric:tabular-nums; }
-.gauge .unit{ font-family:'Inter'; font-weight:500; font-size:12px; color:var(--ink-soft); margin-left:4px; }
+.gauge .value{ font-family:'Archivo'; font-weight:800; font-size:25px; color:var(--ink);
+  margin-top:8px; line-height:1; font-variant-numeric:tabular-nums; }
+.gauge .unit{ font-family:'Inter'; font-weight:500; font-size:11px; color:var(--ink-soft); margin-left:3px; }
 .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:2px solid var(--ink); }
 .stTabs [data-baseweb="tab"]{ font-family:'Archivo'; font-weight:700; text-transform:uppercase;
   letter-spacing:1px; font-size:15px; color:var(--ink-soft); }
@@ -103,87 +100,84 @@ st.markdown(CSS, unsafe_allow_html=True)
 #  CORE ENGINEERING LOGIC
 # ==================================================================
 def oil_gradient_from_api(api):
-    """Pure-oil gradient (0% water) from API: SG=141.5/(131.5+API); grad=SG*0.433."""
     return (141.5 / (131.5 + api)) * 0.433
 
 
 def gs_from_chart(api, pct_water):
-    """OTIS salt water-oil gradient chart (digitized). API line runs from pure-oil
-    gradient (0% water) to the 0.465 psi/ft salt-water node (100% water).
-    Validated: API35/SW90% -> 0.455 psi/ft (source Examples 1 & 3)."""
-    SALT_WATER_GRADIENT = 0.465
-    g0 = oil_gradient_from_api(api)
-    return g0 + (pct_water / 100.0) * (SALT_WATER_GRADIENT - g0)
+    """OTIS salt water-oil chart. API line: pure-oil gradient (0%) -> 0.465 (100%).
+    Validated: API35/SW90 -> 0.455 psi/ft (source Examples 1 & 3)."""
+    return oil_gradient_from_api(api) + (pct_water / 100.0) * (0.465 - oil_gradient_from_api(api))
 
 
 def flowing_bhp_PI(Pr, PI, q):
-    """PI method (undersaturated): Pwf = Pr - q/PI.
-    Validated: Pr3000/PI6.0/q800 -> 2867 psig (source Example 1)."""
+    """PI method (undersaturated): Pwf = Pr - q/PI. Validated Ex1 -> 2867."""
     return Pr - q / PI
 
 
-def gas_pressure_at_depth(Ps_psig, gamma_g, L, T_avg_R, Z):
-    """Casing gas-column pressure at depth (weight of gas column)."""
-    return (Ps_psig + 14.7) * np.exp((gamma_g * L) / (53.34 * T_avg_R * Z)) - 14.7
+def gas_gradient(Ps_psig, gamma_g, T_avg_R, Z):
+    """Weight-of-gas-column gradient, psi/ft:  Gp = Ps*gamma_g / (53.34*Tavg*Z).
+    Validated Ex1: Pko1000 -> 25 psi/1000ft, Pso850 -> ~22 psi/1000ft."""
+    return Ps_psig * gamma_g / (53.34 * T_avg_R * Z)
 
 
-def injection_depth(Pso, Pwf, Gs, D_perf, dP_op, gamma_g, T_avg_R, Z):
-    """Deepest Point of Injection (DPOI), source 'Determination of injection point':
-      - Flowing gradient below inj. (Gfb = Gs) anchored at Pwf at perforation depth:
-            Pfb(d) = Pwf - Gs*(D_perf - d)
-      - Gas injection (casing) line: Pgas(d) = gas_pressure_at_depth(Pso, d)
-      - Point of Balance (POB): depth where Pgas == Pfb.
-      - Injection point = (POB pressure - dP_op) read back onto the flowing line.
-    Returns dict or None if casing pressure never reaches flowing pressure."""
-    d = np.linspace(0.0, D_perf, 5000)
-    Pfb = Pwf - Gs * (D_perf - d)
-    Pgas = gas_pressure_at_depth(Pso, gamma_g, d, T_avg_R, Z)
-    diff = Pgas - Pfb
-    idx = np.where(np.diff(np.sign(diff)) != 0)[0]
-    if len(idx) == 0:
+def fluid_levels(D, Pr, Pwf, Gs):
+    """Static fluid level and working fluid level (source slide 40).
+    SFL = D - Pr/Gs ;  WFL = D - Pwf/Gs.  Validated Ex1 -> 3407 / 3699."""
+    return D - Pr / Gs, D - Pwf / Gs
+
+
+def injection_depth(Pso, Gpso, Pwf, Gs, D, dP_op):
+    """DPOI: gas line (Pso + Gpso*d) meets flowing line below inj (Pwf - Gs*(D-d))
+    at the point of balance (POB); injection = POB pressure - dP_op."""
+    denom = Gs - Gpso
+    if denom <= 0:
         return None
-    i = idx[0]
-    d_POB = float(d[i])
-    P_POB = float(gas_pressure_at_depth(Pso, gamma_g, d_POB, T_avg_R, Z))
+    d_POB = (Pso - Pwf + Gs * D) / denom
+    if not (0.0 < d_POB < D):
+        return None
+    P_POB = Pso + Gpso * d_POB
     P_inj = P_POB - dP_op
-    d_DPOI = D_perf - (Pwf - P_inj) / Gs
+    d_DPOI = D - (Pwf - P_inj) / Gs
+    if not (0.0 < d_DPOI < D):
+        return None
     return {"DPOI": d_DPOI, "P_inj": P_inj, "POB": d_POB, "P_POB": P_POB}
 
 
-def design_gas_lift(valve_type, Pko, Pso, Gs, Gu, dP, min_spacing,
-                    inj_depth, Psurf_first, Psurf_rest):
-    """Analytical valve-spacing method. BALANCED reduces Pso by dP each valve;
-    UNBALANCED keeps Pso constant for all valves."""
-    valves = []
-    DV1 = (Pko - 50 - Psurf_first) / Gs
-    valves.append({"Valve": "V1 (Top)", "Depth (ft)": round(DV1, 1),
-                   "Op. Pressure (psi)": round(Pso, 1), "Spacing (ft)": round(DV1, 1)})
-    Pso_n, DV_prev, n = Pso, DV1, 1
+def design_gas_lift(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing,
+                    dpoi, Ptub_first, Ptub):
+    """Graphical valve-spacing construction (NO Gu). Uses the kill-fluid gradient
+    (Gs) and the descending gas-injection lines (Gpko / Gpso).
+      Top valve : kill-fluid line meets kick-off casing line (Pko-50):
+                  DV1 = (Pko - 50 - Ptub_first) / (Gs - Gpko)
+      Next      : DVn = (Pso_n - Ptub + Gs*DV_prev) / (Gs - Gpso)
+                  Pso_n = Pso - (n-1)*dP  (balanced)  or  Pso  (unbalanced)."""
+    DV1 = (Pko - 50 - Ptub_first) / (Gs - Gpko)
+    valves = [{"Valve": "V1 (Top)", "Depth (ft)": round(DV1, 1),
+               "Op. Pressure (psi)": round(Pso, 1), "Spacing (ft)": round(DV1, 1)}]
+    DV_prev, n = DV1, 1
     while True:
-        if valve_type == "Balanced":
-            Pso_n = Pso_n - dP
-        increment = (Pso_n - Gu * DV_prev - Psurf_rest) / Gs
-        DV_new = DV_prev + increment
-        if DV_new >= inj_depth or increment < min_spacing:
-            break
         n += 1
+        Pso_n = Pso - (n - 1) * dP if valve_type == "Balanced" else Pso
+        DV_new = (Pso_n - Ptub + Gs * DV_prev) / (Gs - Gpso)
+        inc = DV_new - DV_prev
+        if DV_new >= dpoi or inc < min_spacing:
+            break
         valves.append({"Valve": f"V{n}", "Depth (ft)": round(DV_new, 1),
-                       "Op. Pressure (psi)": round(Pso_n, 1), "Spacing (ft)": round(increment, 1)})
+                       "Op. Pressure (psi)": round(Pso_n, 1), "Spacing (ft)": round(inc, 1)})
         DV_prev = DV_new
-    valves.append({"Valve": "Operating", "Depth (ft)": round(inj_depth, 1),
-                   "Op. Pressure (psi)": round(Pso_n, 1), "Spacing (ft)": round(inj_depth - DV_prev, 1)})
+    Pso_op = Pso - (len(valves) - 1) * dP if valve_type == "Balanced" else Pso
+    valves.append({"Valve": "Operating", "Depth (ft)": round(dpoi, 1),
+                   "Op. Pressure (psi)": round(Pso_op, 1), "Spacing (ft)": round(dpoi - DV_prev, 1)})
     df = pd.DataFrame(valves)
     return df, {"n_valves": len(df), "n_unloading": len(df) - 1}
 
 
-def gas_volume_required(glr_inj, inj_depth, q):
-    return glr_inj * (inj_depth / 1000.0) * q
+def gas_volume_required(glr_inj, dpoi, q):
+    return glr_inj * (dpoi / 1000.0) * q
 
 
 def wellbore_svg(df, well_depth, inj_depth):
-    W, H = 470, 660
-    top, bot = 66, 34
-    usable = H - top - bot
+    W, H = 470, 660; top, bot = 66, 34; usable = H - top - bot
     def y(d): return top + (d / well_depth) * usable
     cx = 116; cas_l, cas_r = cx - 34, cx + 34; tub_l, tub_r = cx - 17, cx + 17
     p = []; sy = top; td = y(well_depth); iy = y(inj_depth)
@@ -222,50 +216,44 @@ st.sidebar.header("Inputs")
 
 with st.sidebar.expander("Design Method", expanded=True):
     valve_type = st.radio("Valve type", ["Balanced", "Unbalanced"], horizontal=True,
-                          help="Balanced: Pso reduced by dP per valve. "
-                               "Unbalanced: Pso constant for all valves.")
+                          help="Balanced: Pso reduced by dP per valve. Unbalanced: Pso constant.")
 
 with st.sidebar.expander("Well Data", expanded=True):
-    well_depth = st.number_input("Well depth (ft)", value=5000.0, min_value=100.0, step=100.0)
-    q = st.number_input("Design flow rate, q (bbl/d)", value=1200.0, min_value=1.0, step=50.0)
+    well_depth = st.number_input("Well depth (ft)", value=8000.0, min_value=100.0, step=100.0)
+    q = st.number_input("Design flow rate, q (bbl/d)", value=800.0, min_value=1.0, step=50.0)
 
 with st.sidebar.expander("Fluid Properties (-> Gs)", expanded=True):
     api = st.number_input("Oil gravity (deg API)", value=35.0, min_value=10.0, max_value=60.0, step=1.0)
-    water_cut = st.number_input("Water cut / salt water (%)", value=80.0, min_value=0.0, max_value=100.0, step=5.0)
+    water_cut = st.number_input("Water cut / salt water (%)", value=90.0, min_value=0.0, max_value=100.0, step=5.0)
     Gs = gs_from_chart(api, water_cut)
     st.markdown(f'<span class="pill">Gs = {Gs:.3f} psi/ft</span>', unsafe_allow_html=True)
-    st.caption("Gs read automatically from the OTIS salt water-oil chart (API + water cut).")
+    st.caption("Gs from the OTIS salt water-oil chart (API + water cut).")
 
 with st.sidebar.expander("Reservoir / IPR", expanded=True):
-    Pr = st.number_input("Static reservoir pressure, Pr (psi)", value=2500.0, min_value=0.0, step=50.0)
+    Pr = st.number_input("Static reservoir pressure, Pr (psi)", value=3000.0, min_value=0.0, step=50.0)
     have_pwf = st.checkbox("I already have Pwf (BHFP)", value=False,
-                           help="Tick if the flowing bottomhole pressure is given. "
-                                "Otherwise it is computed from Pr, PI and q by the PI method.")
+                           help="Tick if Pwf is given; otherwise it is computed by the PI method.")
     if have_pwf:
-        Pwf = st.number_input("Flowing BHP, Pwf (psi)", value=1300.0, min_value=0.0, step=50.0)
+        Pwf = st.number_input("Flowing BHP, Pwf (psi)", value=2867.0, min_value=0.0, step=50.0)
         PI = None
     else:
-        PI = st.number_input("Productivity index, PI (bbl/d/psi)", value=1.0, min_value=0.001, step=0.1, format="%.3f")
+        PI = st.number_input("Productivity index, PI (bbl/d/psi)", value=6.0, min_value=0.001, step=0.5, format="%.3f")
         Pwf = flowing_bhp_PI(Pr, PI, q)
         st.markdown(f'<span class="pill">Pwf = {Pwf:,.0f} psi</span>', unsafe_allow_html=True)
         st.caption("PI method: Pwf = Pr - q/PI.")
 
 with st.sidebar.expander("Pressures", expanded=True):
-    Pko = st.number_input("Kick-off pressure, Pko (psi)", value=900.0, min_value=0.0, step=10.0)
+    Pko = st.number_input("Kick-off pressure, Pko (psi)", value=1000.0, min_value=0.0, step=10.0)
     Pso = st.number_input("Surface operating pressure, Pso (psi)", value=850.0, min_value=0.0, step=10.0)
-    Pwh = st.number_input("Wellhead pressure, Pwh (psi)", value=200.0, min_value=0.0, step=10.0)
+    Pwh = st.number_input("Wellhead pressure, Pwh (psi)", value=100.0, min_value=0.0, step=10.0)
 
-with st.sidebar.expander("Injection Point", expanded=True):
+with st.sidebar.expander("Injection Point"):
     dP_op = st.number_input("Operating-valve pressure drop, dP_op (psi)", value=100.0, min_value=0.0, step=10.0,
-                            help="Pressure drop across the operating valve at the injection "
-                                 "point (source: assume 100 psi if not given).")
+                            help="Across the operating valve (assume 100 psi if not given).")
 
 with st.sidebar.expander("Valve Spacing Parameters", expanded=True):
-    Gu = st.number_input("Design unloading gradient, Gu (psi/ft)", value=0.125, min_value=0.001, step=0.005, format="%.3f")
-    st.caption("Gu from the OTIS unloading-gradient chart.")
     dP = st.number_input("Valve pressure drop, dP (psi/valve)", value=25.0, min_value=1.0, step=5.0,
-                         disabled=(valve_type == "Unbalanced"),
-                         help="Balanced valves only (15-25 psi).")
+                         disabled=(valve_type == "Unbalanced"), help="Balanced valves only (15-25 psi).")
     min_spacing = st.number_input("Minimum valve spacing (ft)", value=250.0, min_value=10.0, step=10.0)
 
 with st.sidebar.expander("Unloading Method"):
@@ -273,11 +261,11 @@ with st.sidebar.expander("Unloading Method"):
                           ["Pit (first valve only)", "Wellhead", "Separator"])
     Psep = 0.0
     if unload == "Separator":
-        Psep = st.number_input("Separator pressure, Psep (psi)", value=100.0, min_value=0.0, step=10.0)
+        Psep = st.number_input("Separator pressure, Psep (psi)", value=50.0, min_value=0.0, step=10.0)
 
 with st.sidebar.expander("Gas Properties"):
     glr_inj = st.slider("Injection GLR (scf/bbl per 1000 ft)", 150, 250, 200, step=10)
-    gamma_g = st.number_input("Gas relative density, gamma_g", value=0.65, min_value=0.55, max_value=1.2, step=0.01)
+    gamma_g = st.number_input("Gas relative density, gamma_g", value=0.70, min_value=0.55, max_value=1.2, step=0.01)
     T_avg_F = st.number_input("Average flowing temperature (degF)", value=140.0, step=5.0)
     Z = st.number_input("Gas compressibility factor, Z", value=0.90, min_value=0.5, max_value=1.2, step=0.01)
 
@@ -297,44 +285,46 @@ st.markdown(
       <div class="mono">GL</div>
       <div>
         <h1>Gas <span class="hl">Lift</span> Design</h1>
-        <div class="sub">Continuous-flow injection depth, valve spacing &amp; pressure traverse - Analytical Method</div>
+        <div class="sub">Continuous-flow injection depth, fluid levels &amp; valve spacing - Analytical Method</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 st.markdown(f'<div class="marquee"><span>Continuous Flow</span><span class="star">&#10038;</span>'
             f'<span>{valve_type} Valve</span><span class="star">&#10038;</span>'
-            f'<span>Computed DPOI</span><span class="star">&#10038;</span>'
-            f'<span>OTIS Gs Chart</span></div>', unsafe_allow_html=True)
+            f'<span>SFL / WFL</span><span class="star">&#10038;</span>'
+            f'<span>Gpko / Gpso</span></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-#  VALIDATION + INJECTION DEPTH
+#  COMPUTE + VALIDATION
 # ------------------------------------------------------------------
 T_avg_R = T_avg_F + 460.0
+Gpko = gas_gradient(Pko, gamma_g, T_avg_R, Z)   # psi/ft
+Gpso = gas_gradient(Pso, gamma_g, T_avg_R, Z)   # psi/ft
+Pko_at_D = Pko + Gpko * well_depth
+Pso_at_D = Pso + Gpso * well_depth
+SFL, WFL = fluid_levels(well_depth, Pr, Pwf, Gs)
+
 errors = []
 if Pso >= Pko:
     errors.append("Surface operating pressure (Pso) must be lower than kick-off pressure (Pko).")
-if Gu >= Gs:
-    errors.append("Unloading gradient (Gu) must be smaller than kill-fluid gradient (Gs).")
+if Gpko >= Gs or Gpso >= Gs:
+    errors.append("Gas-column gradient exceeds the fluid gradient Gs - check pressures / gas gravity.")
 if Pwf <= 0:
     errors.append("Flowing BHP (Pwf) is <= 0. Check reservoir pressure, PI and rate.")
 
 inj = None
 if not errors:
-    inj = injection_depth(Pso, Pwf, Gs, well_depth, dP_op, gamma_g, T_avg_R, Z)
+    inj = injection_depth(Pso, Gpso, Pwf, Gs, well_depth, dP_op)
     if inj is None:
-        errors.append("No gas-lift injection point: the casing gas pressure never reaches the "
-                      "flowing tubing pressure. Increase Pso, or check Pwf and Gs.")
+        errors.append("No gas-lift injection point: the gas-injection line never balances the "
+                      "flowing tubing pressure within the well. Increase Pso, or check Pwf and Gs.")
 if errors:
     for e in errors:
         st.error(e)
     st.stop()
 
 inj_depth = inj["DPOI"]
-
-# ------------------------------------------------------------------
-#  CALCULATE OUTPUTS
-# ------------------------------------------------------------------
-df, res = design_gas_lift(valve_type, Pko, Pso, Gs, Gu, dP, min_spacing,
+df, res = design_gas_lift(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing,
                           inj_depth, Psurf_first, Psurf_rest)
 Vg = gas_volume_required(glr_inj, inj_depth, q)
 
@@ -352,11 +342,21 @@ def gauge(label, value, unit, solid=False):
 cards = "".join([
     gauge("Injection Depth (DPOI)", f"{inj_depth:,.0f}", "ft", solid=True),
     gauge("Total Valves", res["n_valves"], ""),
-    gauge("Gs (chart)", f"{Gs:.3f}", "psi/ft"),
+    gauge("Static Fluid Level", f"{SFL:,.0f}", "ft"),
+    gauge("Working Fluid Level", f"{WFL:,.0f}", "ft"),
     gauge("Flowing BHP (Pwf)", f"{Pwf:,.0f}", "psi"),
     gauge("Gas Volume", f"{Vg/1e6:.2f}", "MMscf/d"),
 ])
 st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
+cards2 = "".join([
+    gauge("Gs (chart)", f"{Gs:.3f}", "psi/ft"),
+    gauge("Gpko", f"{Gpko*1000:.1f}", "psi/kft"),
+    gauge("Gpso", f"{Gpso*1000:.1f}", "psi/kft"),
+    gauge("Pko @ depth", f"{Pko_at_D:,.0f}", "psi"),
+    gauge("Pso @ depth", f"{Pso_at_D:,.0f}", "psi"),
+    gauge("POB", f"{inj['POB']:,.0f}", "ft"),
+])
+st.markdown(f'<div class="gauge-row">{cards2}</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 #  TABS
@@ -377,7 +377,7 @@ with tab1:
                        "valve_schedule.csv", "text/csv")
 
 with tab2:
-    col_a, col_b = st.columns([1, 1.35])
+    col_a, col_b = st.columns([1, 1.4])
     with col_a:
         st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>Wellbore schematic</div>',
                     unsafe_allow_html=True)
@@ -385,57 +385,52 @@ with tab2:
                     unsafe_allow_html=True)
     with col_b:
         st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
-                    'Pressure traverse &amp; injection point</div>', unsafe_allow_html=True)
+                    'Pressure traverse - injection point &amp; fluid levels</div>', unsafe_allow_html=True)
         TD = well_depth
-        dd = np.linspace(0, TD, 80)
-        dd_u = np.linspace(0, inj_depth, 40)
-        dd_b = np.linspace(inj_depth, TD, 30)
-        Pinj = inj["P_inj"]
-
         rows = []
-        for d in dd:   rows.append((float(gas_pressure_at_depth(Pso, gamma_g, d, T_avg_R, Z)), float(d), "Gas inj. pressure (Pso)"))
-        for d in dd:   rows.append((float(gas_pressure_at_depth(Pko, gamma_g, d, T_avg_R, Z)), float(d), "Kick-off pressure (Pko)"))
-        for d in dd_u: rows.append((Psurf_rest + Gs * float(d), float(d), "Kill-fluid gradient (Gs)"))
-        for d in dd_u: rows.append((Pwh + Gu * float(d), float(d), "Unloading gradient (Gu)"))
-        for d in np.linspace(0, TD, 60):
-            rows.append((Pwf - Gs * (TD - float(d)), float(d), "Flowing gradient below inj. (Gfb)"))
-        d_top = max(0.0, TD - Pr / Gs)
-        for d in np.linspace(d_top, TD, 30):
-            rows.append((Pr - Gs * (TD - float(d)), float(d), "Static reservoir gradient"))
+        # linear gas-injection lines (weight of gas column)
+        rows.append((Pso, 0.0, "Gas inj. pressure (Pso)")); rows.append((Pso_at_D, TD, "Gas inj. pressure (Pso)"))
+        rows.append((Pko, 0.0, "Kick-off pressure (Pko)")); rows.append((Pko_at_D, TD, "Kick-off pressure (Pko)"))
+        # kill-fluid gradient (Gs) from surface back-pressure
+        rows.append((Psurf_rest, 0.0, "Kill-fluid gradient (Gs)"))
+        rows.append((Psurf_rest + Gs * inj_depth, inj_depth, "Kill-fluid gradient (Gs)"))
+        # static reservoir gradient: SFL(0 psi) -> Pr @ TD
+        rows.append((0.0, SFL, "Static gradient (-> Pr)")); rows.append((Pr, TD, "Static gradient (-> Pr)"))
+        # flowing gradient below injection (Gfb=Gs): WFL(0 psi) -> Pwf @ TD
+        rows.append((0.0, WFL, "Flowing gradient (-> Pwf)")); rows.append((Pwf, TD, "Flowing gradient (-> Pwf)"))
         line_df = pd.DataFrame(rows, columns=["Pressure (psi)", "Depth (ft)", "series"])
-
         order = ["Gas inj. pressure (Pso)", "Kick-off pressure (Pko)", "Kill-fluid gradient (Gs)",
-                 "Unloading gradient (Gu)", "Flowing gradient below inj. (Gfb)", "Static reservoir gradient"]
-        palette = ["#2BA8E0", "#1B6B3A", "#3FAE4A", "#B0179B", "#E8852B", "#1F6FB2"]
+                 "Static gradient (-> Pr)", "Flowing gradient (-> Pwf)"]
+        palette = ["#2BA8E0", "#1B6B3A", "#3FAE4A", "#1F6FB2", "#E8852B"]
 
         ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True), title="Depth (ft)")
         ax = alt.X("Pressure (psi):Q", title="Pressure (psig)")
         lines = alt.Chart(line_df).mark_line(strokeWidth=2.3).encode(
-            x=ax, y=ay,
+            x=ax, y=ay, detail="series:N",
             color=alt.Color("series:N", scale=alt.Scale(domain=order, range=palette),
                             legend=alt.Legend(orient="bottom", title=None, columns=2)))
 
         vp = df.copy()
-        vp["Pressure (psi)"] = [float(gas_pressure_at_depth(Pso, gamma_g, d, T_avg_R, Z))
-                                for d in vp["Depth (ft)"]]
-        vp_unload = vp[vp["Valve"] != "Operating"]
-        points = alt.Chart(vp_unload).mark_point(size=170, shape="triangle-right", filled=True,
-                color="#FFD60A", stroke="#161616", strokeWidth=1.5).encode(
+        vp["Pressure (psi)"] = [Pso + Gpso * d for d in vp["Depth (ft)"]]
+        pts = alt.Chart(vp[vp["Valve"] != "Operating"]).mark_point(
+            size=170, shape="triangle-right", filled=True, color="#FFD60A",
+            stroke="#161616", strokeWidth=1.5).encode(
             x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)"])
-        vlabels = alt.Chart(vp_unload).mark_text(align="left", dx=11, fontSize=10, color="#161616",
-                fontWeight="bold").encode(x="Pressure (psi):Q", y=ay, text="Valve")
+        vlab = alt.Chart(vp[vp["Valve"] != "Operating"]).mark_text(
+            align="left", dx=11, fontSize=10, color="#161616", fontWeight="bold").encode(
+            x="Pressure (psi):Q", y=ay, text="Valve")
 
-        key_pts = pd.DataFrame({
-            "Pressure (psi)": [inj["P_POB"], Pinj, Pwf, Pr],
-            "Depth (ft)": [inj["POB"], inj_depth, TD, TD],
-            "tag": ["POB (balance)", "Injection point", "Pwf", "Pr"]})
-        kp = alt.Chart(key_pts).mark_point(size=150, filled=True, color="#161616").encode(
+        key = pd.DataFrame({
+            "Pressure (psi)": [inj["P_POB"], inj["P_inj"], 0.0, 0.0, Pr, Pwf],
+            "Depth (ft)": [inj["POB"], inj_depth, SFL, WFL, TD, TD],
+            "tag": ["POB", "Injection", "SFL", "WFL", "Pr", "Pwf"]})
+        kp = alt.Chart(key).mark_point(size=140, filled=True, color="#161616").encode(
             x="Pressure (psi):Q", y=ay, tooltip=["tag", "Pressure (psi)", "Depth (ft)"])
-        kp_lbl = alt.Chart(key_pts).mark_text(align="left", dx=9, fontSize=10, color="#161616").encode(
-            x="Pressure (psi):Q", y=ay, text="tag")
+        klab = alt.Chart(key).mark_text(align="left", dx=8, fontSize=10, color="#161616",
+            fontWeight="bold").encode(x="Pressure (psi):Q", y=ay, text="tag")
 
-        chart = (alt.layer(lines, points, vlabels, kp, kp_lbl)
-                 .properties(height=660, background="transparent")
+        chart = (alt.layer(lines, pts, vlab, kp, klab)
+                 .properties(height=680, background="transparent")
                  .configure_axis(labelColor="#5A554C", titleColor="#161616",
                                  gridColor="#E3DDD0", domainColor="#161616")
                  .configure_legend(labelColor="#161616", labelFontSize=11)
@@ -445,25 +440,26 @@ with tab2:
 with tab3:
     st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>Method, inputs &amp; outputs</div>',
                 unsafe_allow_html=True)
-    pwf_src = "entered directly" if have_pwf else "computed by PI method (Pwf = Pr - q/PI)"
+    pwf_src = "entered directly" if have_pwf else "PI method (Pwf = Pr - q/PI)"
     st.markdown(
         '<div class="note">'
-        f'<b>Selected design method:</b> {valve_type} valve. '
-        'Balanced reduces Pso by dP (15-25 psi) each valve; Unbalanced keeps Pso constant '
-        '("For unbalanced valve Pso is used for all valves depth").<br><br>'
-        '<b>Injection depth (DPOI) - computed, not entered:</b> the gas injection (Pso) line '
-        'and the flowing gradient below injection (Gfb = Gs, anchored at Pwf) meet at the '
-        'point of balance (POB). The injection point is (POB pressure - operating-valve dP, '
-        'default 100 psi) read back onto the flowing line.<br><br>'
-        f'<b>Flowing bottomhole pressure Pwf:</b> {pwf_src}.<br><br>'
-        '<b>Gs:</b> OTIS salt water-oil chart via API and water cut (validated API35/SW90% -> '
-        '0.455 psi/ft).<br><br>'
-        '<b>Equations:</b><br>'
-        '&bull; Pwf = Pr - q/PI<br>'
-        '&bull; POB: gas_line(d) = Pwf - Gs&middot;(D - d) ; Injection = POB - dP_op<br>'
-        '&bull; First valve: DV1 = (Pko - 50 - Psurf)/Gs<br>'
-        '&bull; Next valves: DVn+1 = DVn + (Pso_n - Gu&middot;DVn - Psurf)/Gs<br>'
-        '&bull; Gas volume: Vg = GLR_inj &times; (DPOI/1000) &times; q'
+        f'<b>Design method:</b> {valve_type} valve.<br><br>'
+        '<b>Fluid levels (linked to Pr &amp; Pwf):</b><br>'
+        f'&bull; Static fluid level SFL = D - Pr/Gs = {SFL:,.0f} ft<br>'
+        f'&bull; Working fluid level WFL = D - Pwf/Gs = {WFL:,.0f} ft<br>'
+        'The static gradient line runs from Pr at well depth up to SFL (0 psi); the flowing '
+        'gradient (Gfb = Gs) runs from Pwf up to WFL.<br><br>'
+        '<b>Gas-column gradients from Pko, Pso &amp; gas gravity:</b><br>'
+        f'&bull; Gpko = Pko&middot;gamma_g/(53.34&middot;Tavg&middot;Z) = {Gpko*1000:.1f} psi/1000ft '
+        f'-> Pko @ {well_depth:,.0f} ft = {Pko_at_D:,.0f} psi<br>'
+        f'&bull; Gpso = Pso&middot;gamma_g/(53.34&middot;Tavg&middot;Z) = {Gpso*1000:.1f} psi/1000ft '
+        f'-> Pso @ {well_depth:,.0f} ft = {Pso_at_D:,.0f} psi<br><br>'
+        '<b>Injection depth (DPOI):</b> gas line (Pso + Gpso&middot;d) meets the flowing line '
+        f'(Pwf - Gs&middot;(D-d)) at POB = {inj["POB"]:,.0f} ft; injection point = POB - dP_op.<br><br>'
+        '<b>Valve spacing (NO Gu):</b> graphical construction using Gs and the gas lines.<br>'
+        '&bull; Top valve: DV1 = (Pko - 50 - Psurf)/(Gs - Gpko)<br>'
+        '&bull; Next: DVn = (Pso_n - Ptub + Gs&middot;DV_prev)/(Gs - Gpso)<br><br>'
+        f'<b>Pwf source:</b> {pwf_src}. <b>Gs:</b> OTIS salt water-oil chart (API + water cut).'
         '</div>', unsafe_allow_html=True)
 
 st.markdown(f'<div class="foot">Continuous Gas Lift Design<span class="star">&#10038;</span>'
