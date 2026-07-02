@@ -114,10 +114,26 @@ def flowing_bhp_PI(Pr, PI, q):
     return Pr - q / PI
 
 
-def gas_gradient(Ps_psig, gamma_g, T_avg_R, Z):
-    """Weight-of-gas-column gradient, psi/ft:  Gp = Ps*gamma_g / (53.34*Tavg*Z).
-    Validated Ex1: Pko1000 -> 25 psi/1000ft, Pso850 -> ~22 psi/1000ft."""
-    return Ps_psig * gamma_g / (53.34 * T_avg_R * Z)
+CHART_SG = 0.65          # weight-of-gas-column chart base gas gravity
+CHART_T_R = 60 + 460     # chart base temperature (60 degF) in Rankine
+
+
+def gas_gradient_chart(Ps_psig, Z):
+    """Weight-of-gas-column gradient read straight from the chart at its base
+    conditions (gas gravity 0.65, chart temperature), psi/ft. No correction."""
+    return Ps_psig * CHART_SG / (53.34 * CHART_T_R * Z)
+
+
+def gas_gradient(Ps_psig, gamma_g, T_avg_R, Z, temp_correction=True):
+    """Gas-column gradient. If temp_correction is ON, apply the source correction
+    (slide 45):  Pcorr = Pchart * (Actual SG / 0.65) * (Chart T / Actual Tavg),
+    which is equivalent to using the actual gas gravity and actual average
+    temperature. If OFF, the raw chart value (SG 0.65, chart T) is used.
+    Validated Ex1: chart base -> 26 psi/1000ft; corrected (SG0.70,140F) -> 24.3."""
+    g_chart = gas_gradient_chart(Ps_psig, Z)
+    if temp_correction:
+        return g_chart * (gamma_g / CHART_SG) * (CHART_T_R / T_avg_R)
+    return g_chart
 
 
 def fluid_levels(D, Pr, Pwf, Gs):
@@ -204,8 +220,12 @@ def build_zigzag(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing, dpoi, P_
     return valves, diagonals, horizontals
 
 
-def gas_volume_required(glr_inj, dpoi, q):
-    return glr_inj * (dpoi / 1000.0) * q
+def gas_rate_min_max(dpoi, q):
+    """Min/Max gas rate required (source): Q = (150-250 scf/bbl/1000ft) x (DPOI/1000) x q.
+    Min uses 150, Max uses 250. Validated Ex1 (DPOI5550, q800) -> 666 / 1110 Mscf/d."""
+    q_min = 150.0 * (dpoi / 1000.0) * q     # scf/d
+    q_max = 250.0 * (dpoi / 1000.0) * q     # scf/d
+    return q_min, q_max
 
 
 def wellbore_svg(df, well_depth, inj_depth):
@@ -298,11 +318,13 @@ with st.sidebar.expander("Unloading Method"):
 with st.sidebar.expander("Gas Properties"):
     gamma_g = st.number_input("Gas relative density, gamma_g", value=0.70, min_value=0.55, max_value=1.2, step=0.01)
     T_avg_F = st.number_input("Average flowing temperature (degF)", value=140.0, step=5.0)
-    st.caption("Z (gas compressibility) fixed at 0.90 and injection GLR at 200 scf/bbl/1000ft "
-               "(rule of thumb) - not part of the given data.")
+    temp_correction = st.checkbox("Apply temperature correction", value=True,
+                                  help="ON: correct the chart gas gradient to actual gas gravity "
+                                       "and actual Tavg (Pcorr = Pchart x (SG/0.65) x (ChartT/Tavg)). "
+                                       "OFF: use the raw chart value (as in the examples).")
+    st.caption("Z (gas compressibility) fixed at 0.90 - not part of the given data.")
 
 Z = 0.90            # rule-of-thumb assumption (not a given input)
-glr_inj = 200       # scf/bbl/1000ft rule of thumb (150-250)
 
 if unload == "Pit (first valve only)":
     Psurf_first, Psurf_rest = 0.0, Pwh
@@ -333,8 +355,8 @@ st.markdown(f'<div class="marquee"><span>Continuous Flow</span><span class="star
 #  COMPUTE + VALIDATION
 # ------------------------------------------------------------------
 T_avg_R = T_avg_F + 460.0
-Gpko = gas_gradient(Pko, gamma_g, T_avg_R, Z)   # psi/ft
-Gpso = gas_gradient(Pso, gamma_g, T_avg_R, Z)   # psi/ft
+Gpko = gas_gradient(Pko, gamma_g, T_avg_R, Z, temp_correction)   # psi/ft
+Gpso = gas_gradient(Pso, gamma_g, T_avg_R, Z, temp_correction)   # psi/ft
 Pko_at_D = Pko + Gpko * well_depth
 Pso_at_D = Pso + Gpso * well_depth
 SFL, WFL = fluid_levels(well_depth, Pr, Pwf, Gs)
@@ -374,7 +396,7 @@ rows_v.append({"Valve": "Operating", "Depth (ft)": round(inj_depth, 1),
                "Spacing (ft)": round(inj_depth - prev, 1)})
 df = pd.DataFrame(rows_v)
 res = {"n_valves": len(df), "n_unloading": len(df) - 1}
-Vg = gas_volume_required(glr_inj, inj_depth, q)
+Qmin, Qmax = gas_rate_min_max(inj_depth, q)
 
 # ------------------------------------------------------------------
 #  OUTPUTS : GAUGES
@@ -392,17 +414,17 @@ cards = "".join([
     gauge("Total Valves", res["n_valves"], ""),
     gauge("Static Fluid Level", f"{SFL:,.0f}", "ft"),
     gauge("Working Fluid Level", f"{WFL:,.0f}", "ft"),
-    gauge("Flowing BHP (Pwf)", f"{Pwf:,.0f}", "psi"),
-    gauge("Gas Volume", f"{Vg/1e6:.2f}", "MMscf/d"),
+    gauge("Min Gas Rate", f"{Qmin/1000:,.0f}", "Mscf/d"),
+    gauge("Max Gas Rate", f"{Qmax/1000:,.0f}", "Mscf/d"),
 ])
 st.markdown(f'<div class="gauge-row">{cards}</div>', unsafe_allow_html=True)
 cards2 = "".join([
+    gauge("Flowing BHP (Pwf)", f"{Pwf:,.0f}", "psi"),
     gauge("Gs (chart)", f"{Gs:.3f}", "psi/ft"),
     gauge("Gpko", f"{Gpko*1000:.1f}", "psi/kft"),
     gauge("Gpso", f"{Gpso*1000:.1f}", "psi/kft"),
     gauge("Pko @ depth", f"{Pko_at_D:,.0f}", "psi"),
     gauge("Pso @ depth", f"{Pso_at_D:,.0f}", "psi"),
-    gauge("POB", f"{inj['POB']:,.0f}", "ft"),
 ])
 st.markdown(f'<div class="gauge-row">{cards2}</div>', unsafe_allow_html=True)
 
@@ -508,15 +530,21 @@ with tab3:
         'The static gradient line runs from Pr at well depth up to SFL (0 psi); the flowing '
         'gradient (Gfb = Gs) runs from Pwf up to WFL.<br><br>'
         '<b>Gas-column gradients from Pko, Pso &amp; gas gravity:</b><br>'
-        f'&bull; Gpko = Pko&middot;gamma_g/(53.34&middot;Tavg&middot;Z) = {Gpko*1000:.1f} psi/1000ft '
-        f'-> Pko @ {well_depth:,.0f} ft = {Pko_at_D:,.0f} psi<br>'
-        f'&bull; Gpso = Pso&middot;gamma_g/(53.34&middot;Tavg&middot;Z) = {Gpso*1000:.1f} psi/1000ft '
-        f'-> Pso @ {well_depth:,.0f} ft = {Pso_at_D:,.0f} psi<br><br>'
+        f'&bull; Gpko = {Gpko*1000:.1f} psi/1000ft -> Pko @ {well_depth:,.0f} ft = {Pko_at_D:,.0f} psi<br>'
+        f'&bull; Gpso = {Gpso*1000:.1f} psi/1000ft -> Pso @ {well_depth:,.0f} ft = {Pso_at_D:,.0f} psi<br>'
+        f'&bull; Temperature correction: <b>{"ON" if temp_correction else "OFF"}</b>. '
+        'When ON, the chart gradient is corrected with Pcorr = Pchart&middot;(SG/0.65)&middot;'
+        '(ChartT/Tavg) - i.e. evaluated at the actual gas gravity and average temperature. '
+        'When OFF, the raw chart value (SG 0.65, chart T) is used, as in the examples.<br><br>'
         '<b>Injection depth (DPOI):</b> gas line (Pso + Gpso&middot;d) meets the flowing line '
         f'(Pwf - Gs&middot;(D-d)) at POB = {inj["POB"]:,.0f} ft; injection point = POB - dP_op.<br><br>'
         '<b>Valve spacing (NO Gu):</b> graphical construction using Gs and the gas lines.<br>'
         '&bull; Top valve: DV1 = (Pko - 50 - Psurf)/(Gs - Gpko)<br>'
         '&bull; Next: DVn = (Pso_n - Ptub + Gs&middot;DV_prev)/(Gs - Gpso)<br><br>'
+        '<b>Gas rate required (source 150-250 scf/bbl/1000ft):</b><br>'
+        f'&bull; Min = 150 &times; (DPOI/1000) &times; q = {Qmin/1000:,.0f} Mscf/d<br>'
+        f'&bull; Max = 250 &times; (DPOI/1000) &times; q = {Qmax/1000:,.0f} Mscf/d<br>'
+        '(validated vs source Example 1: 666 / 1110 Mscf/d).<br><br>'
         f'<b>Pwf source:</b> {pwf_src}. <b>Gs:</b> OTIS salt water-oil chart (API + water cut).'
         '</div>', unsafe_allow_html=True)
 
