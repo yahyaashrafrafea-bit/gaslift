@@ -172,6 +172,38 @@ def design_gas_lift(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing,
     return df, {"n_valves": len(df), "n_unloading": len(df) - 1}
 
 
+def build_zigzag(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing, dpoi, P_inj):
+    """Graphical zigzag valve-spacing construction referenced to the TUBING line
+    (straight line from surface (0,0) to the injection point (P_inj, DPOI)).
+      - Top valve V1: kill-fluid (Gs) line from surface meets the Pko-50 casing line.
+      - Each next valve: from the tubing line, a Gs line meets the Pso casing line
+        (Pso reduced by dP per valve for balanced; constant for unbalanced).
+      - A horizontal connector returns from each valve to the tubing line (the zigzag).
+    Returns valves list plus diagonal/horizontal segment lists for plotting."""
+    def Ptub(d):
+        return (P_inj / dpoi) * d
+    diagonals, horizontals, valves = [], [], []
+    d1 = (Pko - 50 - 0.0) / (Gs - Gpko)          # Gs from (0,0) to Pko-50 line
+    P1c = (Pko - 50) + Gpko * d1
+    diagonals.append(((0.0, 0.0), (P1c, d1)))
+    valves.append(("V1 (Top)", d1, P1c))
+    horizontals.append(((P1c, d1), (Ptub(d1), d1)))
+    d_prev, n = d1, 1
+    while True:
+        n += 1
+        Pso_n = Pso - (n - 1) * dP if valve_type == "Balanced" else Pso
+        Pstart = Ptub(d_prev)
+        d_new = (Pso_n - Pstart + Gs * d_prev) / (Gs - Gpso)
+        if d_new >= dpoi or (d_new - d_prev) < min_spacing:
+            break
+        Pc = Pso_n + Gpso * d_new
+        diagonals.append(((Pstart, d_prev), (Pc, d_new)))
+        valves.append((f"V{n}", d_new, Pc))
+        horizontals.append(((Pc, d_new), (Ptub(d_new), d_new)))
+        d_prev = d_new
+    return valves, diagonals, horizontals
+
+
 def gas_volume_required(glr_inj, dpoi, q):
     return glr_inj * (dpoi / 1000.0) * q
 
@@ -264,10 +296,13 @@ with st.sidebar.expander("Unloading Method"):
         Psep = st.number_input("Separator pressure, Psep (psi)", value=50.0, min_value=0.0, step=10.0)
 
 with st.sidebar.expander("Gas Properties"):
-    glr_inj = st.slider("Injection GLR (scf/bbl per 1000 ft)", 150, 250, 200, step=10)
     gamma_g = st.number_input("Gas relative density, gamma_g", value=0.70, min_value=0.55, max_value=1.2, step=0.01)
     T_avg_F = st.number_input("Average flowing temperature (degF)", value=140.0, step=5.0)
-    Z = st.number_input("Gas compressibility factor, Z", value=0.90, min_value=0.5, max_value=1.2, step=0.01)
+    st.caption("Z (gas compressibility) fixed at 0.90 and injection GLR at 200 scf/bbl/1000ft "
+               "(rule of thumb) - not part of the given data.")
+
+Z = 0.90            # rule-of-thumb assumption (not a given input)
+glr_inj = 200       # scf/bbl/1000ft rule of thumb (150-250)
 
 if unload == "Pit (first valve only)":
     Psurf_first, Psurf_rest = 0.0, Pwh
@@ -324,8 +359,21 @@ if errors:
     st.stop()
 
 inj_depth = inj["DPOI"]
-df, res = design_gas_lift(valve_type, Pko, Pso, Gs, Gpko, Gpso, dP, min_spacing,
-                          inj_depth, Psurf_first, Psurf_rest)
+P_inj = inj["P_inj"]
+
+# Graphical zigzag construction (tubing line referenced) - drives table AND diagram
+zz_valves, zz_diag, zz_hor = build_zigzag(valve_type, Pko, Pso, Gs, Gpko, Gpso,
+                                          dP, min_spacing, inj_depth, P_inj)
+rows_v = [{"Valve": nm, "Depth (ft)": round(d, 1),
+           "Casing Pressure (psi)": round(pc, 1)} for nm, d, pc in zz_valves]
+prev = 0.0
+for r in rows_v:
+    r["Spacing (ft)"] = round(r["Depth (ft)"] - prev, 1); prev = r["Depth (ft)"]
+rows_v.append({"Valve": "Operating", "Depth (ft)": round(inj_depth, 1),
+               "Casing Pressure (psi)": round(P_inj, 1),
+               "Spacing (ft)": round(inj_depth - prev, 1)})
+df = pd.DataFrame(rows_v)
+res = {"n_valves": len(df), "n_unloading": len(df) - 1}
 Vg = gas_volume_required(glr_inj, inj_depth, q)
 
 # ------------------------------------------------------------------
@@ -387,49 +435,59 @@ with tab2:
         st.markdown('<div class="eyebrow"><span class="star">&#10038;</span>'
                     'Pressure traverse - injection point &amp; fluid levels</div>', unsafe_allow_html=True)
         TD = well_depth
-        rows = []
-        # linear gas-injection lines (weight of gas column)
-        rows.append((Pso, 0.0, "Gas inj. pressure (Pso)")); rows.append((Pso_at_D, TD, "Gas inj. pressure (Pso)"))
-        rows.append((Pko, 0.0, "Kick-off pressure (Pko)")); rows.append((Pko_at_D, TD, "Kick-off pressure (Pko)"))
-        # kill-fluid gradient (Gs) from surface back-pressure
-        rows.append((Psurf_rest, 0.0, "Kill-fluid gradient (Gs)"))
-        rows.append((Psurf_rest + Gs * inj_depth, inj_depth, "Kill-fluid gradient (Gs)"))
-        # static reservoir gradient: SFL(0 psi) -> Pr @ TD
-        rows.append((0.0, SFL, "Static gradient (-> Pr)")); rows.append((Pr, TD, "Static gradient (-> Pr)"))
-        # flowing gradient below injection (Gfb=Gs): WFL(0 psi) -> Pwf @ TD
-        rows.append((0.0, WFL, "Flowing gradient (-> Pwf)")); rows.append((Pwf, TD, "Flowing gradient (-> Pwf)"))
-        line_df = pd.DataFrame(rows, columns=["Pressure (psi)", "Depth (ft)", "series"])
-        order = ["Gas inj. pressure (Pso)", "Kick-off pressure (Pko)", "Kill-fluid gradient (Gs)",
-                 "Static gradient (-> Pr)", "Flowing gradient (-> Pwf)"]
-        palette = ["#2BA8E0", "#1B6B3A", "#3FAE4A", "#1F6FB2", "#E8852B"]
-
         ay = alt.Y("Depth (ft):Q", scale=alt.Scale(reverse=True), title="Depth (ft)")
         ax = alt.X("Pressure (psi):Q", title="Pressure (psig)")
+
+        # --- main lines: Pso, Pko (to depth), tubing line (0,0)->DPOI, SFL/WFL gradients ---
+        rows = [
+            (Pso, 0.0, "Gas inj. pressure (Pso)"), (Pso_at_D, TD, "Gas inj. pressure (Pso)"),
+            (Pko, 0.0, "Kick-off pressure (Pko)"), (Pko_at_D, TD, "Kick-off pressure (Pko)"),
+            (0.0, 0.0, "Tubing line (-> DPOI)"), (P_inj, inj_depth, "Tubing line (-> DPOI)"),
+            (0.0, SFL, "Static gradient (-> Pr)"), (Pr, TD, "Static gradient (-> Pr)"),
+            (0.0, WFL, "Flowing gradient (-> Pwf)"), (Pwf, TD, "Flowing gradient (-> Pwf)"),
+        ]
+        line_df = pd.DataFrame(rows, columns=["Pressure (psi)", "Depth (ft)", "series"])
+        order = ["Gas inj. pressure (Pso)", "Kick-off pressure (Pko)", "Tubing line (-> DPOI)",
+                 "Static gradient (-> Pr)", "Flowing gradient (-> Pwf)"]
+        palette = ["#2BA8E0", "#1B6B3A", "#B0179B", "#1F6FB2", "#E8852B"]
         lines = alt.Chart(line_df).mark_line(strokeWidth=2.3).encode(
             x=ax, y=ay, detail="series:N",
             color=alt.Color("series:N", scale=alt.Scale(domain=order, range=palette),
                             legend=alt.Legend(orient="bottom", title=None, columns=2)))
 
-        vp = df.copy()
-        vp["Pressure (psi)"] = [Pso + Gpso * d for d in vp["Depth (ft)"]]
-        pts = alt.Chart(vp[vp["Valve"] != "Operating"]).mark_point(
-            size=170, shape="triangle-right", filled=True, color="#FFD60A",
-            stroke="#161616", strokeWidth=1.5).encode(
-            x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)"])
-        vlab = alt.Chart(vp[vp["Valve"] != "Operating"]).mark_text(
-            align="left", dx=11, fontSize=10, color="#161616", fontWeight="bold").encode(
-            x="Pressure (psi):Q", y=ay, text="Valve")
+        # --- zigzag: green Gs transfer diagonals + red dashed horizontal connectors ---
+        dgd = []
+        for i, (a, b) in enumerate(zz_diag):
+            dgd += [(a[0], a[1], i), (b[0], b[1], i)]
+        gdiag = alt.Chart(pd.DataFrame(dgd, columns=["Pressure (psi)", "Depth (ft)", "g"])).mark_line(
+            strokeWidth=2, color="#3FAE4A").encode(x="Pressure (psi):Q", y=ay, detail="g:N")
+        hzd = []
+        for i, (a, b) in enumerate(zz_hor):
+            hzd += [(a[0], a[1], i), (b[0], b[1], i)]
+        ghz = alt.Chart(pd.DataFrame(hzd, columns=["Pressure (psi)", "Depth (ft)", "g"])).mark_line(
+            strokeWidth=1.5, color="#E0392B", strokeDash=[5, 3]).encode(
+            x="Pressure (psi):Q", y=ay, detail="g:N")
 
+        # --- valve markers on their casing lines ---
+        vv = pd.DataFrame([(pc, d, nm) for nm, d, pc in zz_valves],
+                          columns=["Pressure (psi)", "Depth (ft)", "Valve"])
+        pts = alt.Chart(vv).mark_point(size=175, shape="triangle-right", filled=True,
+                color="#FFD60A", stroke="#161616", strokeWidth=1.5).encode(
+                x="Pressure (psi):Q", y=ay, tooltip=["Valve", "Depth (ft)"])
+        vlab = alt.Chart(vv).mark_text(align="left", dx=11, fontSize=10, color="#161616",
+                fontWeight="bold").encode(x="Pressure (psi):Q", y=ay, text="Valve")
+
+        # --- key points: injection, SFL, WFL, Pr, Pwf ---
         key = pd.DataFrame({
-            "Pressure (psi)": [inj["P_POB"], inj["P_inj"], 0.0, 0.0, Pr, Pwf],
-            "Depth (ft)": [inj["POB"], inj_depth, SFL, WFL, TD, TD],
-            "tag": ["POB", "Injection", "SFL", "WFL", "Pr", "Pwf"]})
-        kp = alt.Chart(key).mark_point(size=140, filled=True, color="#161616").encode(
+            "Pressure (psi)": [P_inj, 0.0, 0.0, Pr, Pwf],
+            "Depth (ft)": [inj_depth, SFL, WFL, TD, TD],
+            "tag": ["Injection", "SFL", "WFL", "Pr", "Pwf"]})
+        kp = alt.Chart(key).mark_point(size=150, filled=True, color="#161616").encode(
             x="Pressure (psi):Q", y=ay, tooltip=["tag", "Pressure (psi)", "Depth (ft)"])
         klab = alt.Chart(key).mark_text(align="left", dx=8, fontSize=10, color="#161616",
             fontWeight="bold").encode(x="Pressure (psi):Q", y=ay, text="tag")
 
-        chart = (alt.layer(lines, pts, vlab, kp, klab)
+        chart = (alt.layer(lines, gdiag, ghz, pts, vlab, kp, klab)
                  .properties(height=680, background="transparent")
                  .configure_axis(labelColor="#5A554C", titleColor="#161616",
                                  gridColor="#E3DDD0", domainColor="#161616")
